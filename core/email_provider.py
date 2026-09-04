@@ -193,26 +193,15 @@ def wait_for_otp(
 ) -> str:
     """等待并返回该邮箱最新的 ChatGPT OTP（6 位数字字符串）。
 
-    USE_EMAIL_SERVICE=False 时走手动验证码通道（WebUI 提交 / CLI 输入），
-    不再强制要求 Outlook clientId/refreshToken。
+    USE_EMAIL_SERVICE=False 时，未绑定自动取码来源的邮箱走手动通道
+    （WebUI 提交 / CLI 输入）。已落库 generic_api / 其它自动来源的账号
+    （例如团队子号的 mail 提取链接）仍自动取码。
     """
     try:
         from config import email as _email_cfg
         use_service = bool(getattr(_email_cfg, "USE_EMAIL_SERVICE", True))
     except Exception:
         use_service = True
-
-    if not use_service:
-        from core.manual_otp import wait_for_manual_otp
-        from config import email as _email_cfg
-        timeout = int(max_wait if max_wait is not None else (getattr(_email_cfg, "OTP_MAX_WAIT", 180) or 180))
-        job_id = None
-        try:
-            from core import registration_service as svc
-            job_id = getattr(svc._THREAD_CTX, "job_id", None)
-        except Exception:
-            job_id = None
-        return wait_for_manual_otp(email, timeout=timeout, job_id=job_id)
 
     extra_kwargs = {}
     if max_wait is not None:
@@ -224,11 +213,35 @@ def wait_for_otp(
 
     # 查活等已注册账号会传入注册时保存的来源；即使调用方没有显式传入，
     # 这里也先读取账号落库来源，再按当前进程上下文/邮箱池/全局配置兜底。
-    source = (
+    bound_source = (
         _normalize_explicit_email_source(email_source)
         or _registered_email_source(email)
-        or resolve_email_source(email)
     )
+    if not bound_source:
+        try:
+            from core import db
+            if db.get_generic_api_email_by_email(email):
+                bound_source = "generic_api"
+        except Exception:
+            pass
+
+    # USE_EMAIL_SERVICE=False 只表示注册时不从邮箱池领号、未绑定自动取码的
+    # 邮箱走人工 OTP。团队子号等已绑定 generic_api code_url 的账号仍自动取码。
+    if not use_service and not bound_source:
+        from core.manual_otp import wait_for_manual_otp
+        from config import email as _email_cfg
+        timeout = int(max_wait if max_wait is not None else (getattr(_email_cfg, "OTP_MAX_WAIT", 180) or 180))
+        job_id = None
+        try:
+            from core import registration_service as svc
+            job_id = getattr(svc._THREAD_CTX, "job_id", None)
+        except Exception:
+            job_id = None
+        return wait_for_manual_otp(email, timeout=timeout, job_id=job_id)
+
+    source = bound_source or resolve_email_source(email)
+    if not use_service and bound_source:
+        logger.info("[EmailProvider] 账号已绑定 %s，忽略 USE_EMAIL_SERVICE=False，自动取码：%s", source, email)
     if source == "gptmail":
         from core.gptmail_client import fetch_latest_otp
         return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)

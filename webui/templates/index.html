@@ -198,8 +198,8 @@
       width: 100%; max-width: 100%; min-width: 0;
       max-height: 320px; overflow: auto; line-height: 1.5;
     }
-    #logPanel, #retryLogPanel, #liveLogPanel, #totpLogPanel, #qrPanel { min-width: 0; max-width: 100%; overflow-x: hidden; }
-    #logPanel:not(.hidden), #retryLogPanel:not(.hidden), #liveLogPanel:not(.hidden), #totpLogPanel:not(.hidden), #qrPanel:not(.hidden) {
+    #logPanel, #retryLogPanel, #liveLogPanel, #totpLogPanel, #qrPanel, #teamLogPanel { min-width: 0; max-width: 100%; overflow-x: hidden; }
+    #logPanel:not(.hidden), #retryLogPanel:not(.hidden), #liveLogPanel:not(.hidden), #totpLogPanel:not(.hidden), #qrPanel:not(.hidden), #teamLogPanel:not(.hidden) {
       position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
       z-index: 1000; display: block; width: min(1100px, calc(100vw - 48px));
       max-height: min(760px, calc(100vh - 48px)); overflow: hidden;
@@ -207,9 +207,9 @@
       background: var(--surface); box-shadow: 0 0 0 9999px rgba(15,23,42,.45), 0 24px 70px rgba(15,23,42,.34);
     }
     #qrPanel:not(.hidden) { width: min(520px, calc(100vw - 48px)); text-align: center; }
-    #logPanel h3, #retryLogPanel h3, #liveLogPanel h3, #totpLogPanel h3, #qrPanel h3 { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-    #logPanel h3 .btn, #retryLogPanel h3 .btn, #liveLogPanel h3 .btn, #totpLogPanel h3 .btn, #qrPanel h3 .btn { margin-left:auto; float:none !important; }
-    #logPanel .log, #retryLogPanel .log, #liveLogPanel .log, #totpLogPanel .log { max-height: calc(min(760px, calc(100vh - 48px)) - 74px); margin-top:0; }
+    #logPanel h3, #retryLogPanel h3, #liveLogPanel h3, #totpLogPanel h3, #qrPanel h3, #teamLogPanel h3 { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+    #logPanel h3 .btn, #retryLogPanel h3 .btn, #liveLogPanel h3 .btn, #totpLogPanel h3 .btn, #qrPanel h3 .btn, #teamLogPanel h3 .btn { margin-left:auto; float:none !important; }
+    #logPanel .log, #retryLogPanel .log, #liveLogPanel .log, #totpLogPanel .log, #teamLogPanel .log { max-height: calc(min(760px, calc(100vh - 48px)) - 74px); margin-top:0; }
     #qrPanel img { display:block; max-width:min(360px, calc(100vw - 96px)); max-height:420px; margin:12px auto; border:1px solid var(--line); border-radius:10px; background:#fff; }
     #qrPanel .qr-link { display:block; word-break:break-all; white-space:normal; font-size:12px; color:var(--muted); margin-top:8px; }
     .hidden { display: none !important; }
@@ -1982,6 +1982,294 @@
       .config-overview-v2-title { font-size: 24px; }
     }
 
+    /* ---- 团队转移 ---- */
+    #tab-team { align-content: start; }
+    .team-head {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      gap: 16px; flex-wrap: wrap;
+    }
+    .team-head .register-title { margin: 0; }
+    .team-head-note {
+      margin: 6px 0 0; color: #909399;
+      font-size: 13px; line-height: 1.55; font-weight: 400;
+    }
+    .team-flow {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0; margin: 0; padding: 0; overflow: hidden; list-style: none;
+      border: 1px solid #ebeef5; border-radius: 10px; background: #fff;
+      box-shadow: 0 0 12px rgba(0,0,0,.04);
+    }
+    .team-flow-step {
+      position: relative; min-width: 0; padding: 16px 18px 16px 20px;
+      display: grid; grid-template-columns: 28px 1fr; gap: 10px; align-items: start;
+    }
+    .team-flow-step + .team-flow-step::before {
+      content: ""; position: absolute; left: 0; top: 18px; bottom: 18px; width: 1px; background: #ebeef5;
+    }
+    .team-flow-num {
+      width: 28px; height: 28px; border-radius: 8px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #EBF2FF; color: #377DFF;
+      font-size: 13px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums;
+    }
+    .team-flow-copy { min-width: 0; }
+    .team-flow-copy strong {
+      display: block; color: #303133; font-size: 13px; font-weight: 600; line-height: 1.35;
+    }
+    .team-flow-copy span {
+      display: block; margin-top: 3px; color: #909399; font-size: 12px; line-height: 1.4;
+    }
+    .team-admin-card { overflow: visible; }
+    .team-admin-top {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; flex-wrap: wrap; padding: 14px 16px;
+      border-bottom: 1px solid #ebeef5; background: #fafbfc;
+    }
+    .team-admin-who {
+      display: flex; align-items: center; gap: 10px; min-width: 0;
+    }
+    .team-admin-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #c0c4cc; flex-shrink: 0;
+    }
+    .team-admin-dot.is-busy {
+      background: #fa8c16;
+      box-shadow: 0 0 0 0 rgba(250,140,22,.45);
+      animation: team-pulse 1.4s ease-out infinite;
+    }
+    .team-admin-dot.is-ok { background: #2bb8a6; }
+    .team-admin-dot.is-fail { background: #f56c6c; }
+    .team-admin-who > div { min-width: 0; display: grid; gap: 2px; }
+    .team-admin-who strong { color: #303133; font-size: 14px; font-weight: 600; line-height: 1.3; }
+    .team-admin-who span { display: block; color: #909399; font-size: 12px; line-height: 1.4; }
+    .team-admin-chip {
+      display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+      padding: 4px 10px; border-radius: 999px; border: 1px solid #ebeef5;
+      background: #fff; color: #606266; font-size: 12px; font-weight: 600;
+    }
+    .team-admin-chip code {
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-family: ui-monospace, Consolas, monospace; font-size: 12px; font-weight: 600; color: #303133;
+    }
+    .team-admin-chip button {
+      border: none; background: transparent; color: #377DFF; cursor: pointer;
+      font: inherit; font-size: 12px; font-weight: 600; padding: 0; min-height: 0;
+    }
+    .team-admin-chip button:hover { text-decoration: underline; }
+    .team-admin-top-actions {
+      display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    .team-admin-top-actions .jobs-tb-btn { min-height: 32px; padding: 0 12px; font-size: 13px; }
+    .team-admin-form {
+      display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 1.1fr) minmax(140px, .9fr) auto;
+      gap: 12px 14px; align-items: end; padding: 16px;
+    }
+    .team-field { display: grid; gap: 6px; min-width: 0; margin: 0; }
+    .team-field > span {
+      color: #909399; font-size: 12px; font-weight: 600; line-height: 1.3;
+    }
+    .team-field > span em { font-style: normal; color: #c0c4cc; font-weight: 500; }
+    .team-field input, .team-field textarea {
+      width: 100%; margin: 0; min-height: 40px;
+      border: 1px solid #dcdfe6; border-radius: 6px; background: #fff;
+      padding: 8px 12px; font: inherit; font-size: 14px; color: #303133;
+    }
+    .team-field input::placeholder, .team-field textarea::placeholder { color: #c0c4cc; }
+    #tab-team .jobs-tb-btn {
+      min-height: 40px; border: 1px solid #dcdfe6; border-radius: 6px;
+      background: #fff; color: #606266; padding: 8px 18px;
+      font: inherit; font-size: 14px; font-weight: 400; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+      white-space: nowrap; transition: .1s; line-height: 1; box-sizing: border-box;
+    }
+    #tab-team .jobs-tb-btn[hidden],
+    #tab-team thead[hidden],
+    #tab-team .accounts-table-v2-wrap[hidden],
+    #tab-team .jobs-v2-pager[hidden] { display: none !important; }
+    #tab-team .jobs-tb-btn:hover:not(:disabled) { color: #409eff; border-color: #c6e2ff; background: #ecf5ff; }
+    #tab-team .jobs-tb-btn:disabled { cursor: not-allowed; color: #c0c4cc; background: #fff; border-color: #e4e7ed; }
+    #tab-team .jobs-tb-btn--primary {
+      color: #fff; background: #377DFF; border-color: #377DFF;
+    }
+    #tab-team .jobs-tb-btn--primary:hover:not(:disabled) {
+      background: #5a94ff; border-color: #5a94ff; color: #fff;
+    }
+    #tab-team .jobs-tb-btn--primary:disabled {
+      color: #9CBFFF; background: #EBF2FF; border-color: #D7E5FF;
+    }
+    #tab-team .jobs-tb-btn--danger {
+      color: #e64545; background: #ffe0e0; border-color: #f89898;
+    }
+    #tab-team .jobs-tb-btn--danger:hover:not(:disabled) {
+      background: #f56c6c; border-color: #f56c6c; color: #fff;
+    }
+    #tab-team .jobs-tb-btn--danger:disabled {
+      color: #f3a6a6; background: #fff0f0; border-color: #fbc4c4;
+    }
+    #tab-team .jobs-tb-btn--good {
+      color: #166534; background: #edf8f1; border-color: #b9dfc9;
+    }
+    #tab-team .jobs-tb-btn--good:hover:not(:disabled) {
+      background: #d8f3e0; border-color: #2f855a; color: #166534;
+    }
+    .team-field input:focus, .team-field textarea:focus,
+    .team-field-input input:focus {
+      outline: none; border-color: #377DFF;
+      box-shadow: 0 0 0 3px color-mix(in srgb, #377DFF 16%, transparent);
+    }
+    .team-field-input {
+      display: flex; align-items: stretch; min-width: 0;
+    }
+    .team-field-input input { border-right: none; border-radius: 6px 0 0 6px; }
+    .team-eye {
+      width: 40px; min-width: 40px; border: 1px solid #dcdfe6; border-left: none;
+      border-radius: 0 6px 6px 0; background: #fff; color: #909399; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .team-eye:hover { color: #377DFF; background: #f5f7fa; }
+    .team-eye svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .team-admin-actions {
+      display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap;
+    }
+    .team-admin-actions .jobs-tb-btn { min-height: 40px; }
+    .team-otp {
+      display: none; align-items: center; gap: 12px; flex-wrap: wrap;
+      margin: 0 16px 16px; padding: 12px 14px;
+      border: 1px solid #ffd591; border-radius: 8px; background: #fff7e6;
+    }
+    .team-otp.is-open { display: flex; }
+    .team-otp-copy { min-width: 0; flex: 1; }
+    .team-otp-copy strong { display: block; color: #ad6800; font-size: 13px; }
+    .team-otp-copy span { display: block; margin-top: 2px; color: #8c6d1f; font-size: 12px; line-height: 1.4; }
+    .team-otp-row { display: inline-flex; align-items: center; gap: 8px; }
+    .team-otp-row input {
+      width: 132px; min-height: 40px; margin: 0; text-align: center;
+      letter-spacing: .18em; font-weight: 700; font-variant-numeric: tabular-nums;
+      border: 1px solid #ffd591; border-radius: 6px; background: #fff;
+    }
+    .team-otp-row input:focus {
+      outline: none; border-color: #fa8c16;
+      box-shadow: 0 0 0 3px rgba(250,140,22,.16);
+    }
+    .team-admin-error {
+      display: none; margin: 0 16px 16px; padding: 10px 12px;
+      border: 1px solid #fbc4c4; border-radius: 8px; background: #fef0f0;
+      color: #c45656; font-size: 13px; line-height: 1.45;
+    }
+    .team-admin-error.is-open { display: block; }
+    .team-metrics {
+      display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;
+    }
+    .team-metric {
+      min-width: 0; padding: 12px 14px;
+      border: 1px solid #ebeef5; border-radius: 10px; background: #fff;
+      box-shadow: 0 0 12px rgba(0,0,0,.04);
+    }
+    .team-metric span { display: block; color: #909399; font-size: 12px; line-height: 1.3; }
+    .team-metric strong {
+      display: block; margin-top: 8px; color: #303133; font-size: 20px; font-weight: 600;
+      line-height: 1; font-variant-numeric: tabular-nums;
+    }
+    .team-metric.is-warn strong { color: #d48806; }
+    .team-metric.is-run strong { color: #fa8c16; }
+    .team-metric.is-ok strong { color: #2bb8a6; }
+    .team-metric.is-fail strong { color: #f56c6c; }
+    #tab-team .accounts-filter-v2 { padding: 12px 16px; gap: 8px; }
+    #tab-team .accounts-filter-v2 .jobs-tb-btn--primary {
+      color: #fff; background: #377DFF; border-color: #377DFF;
+    }
+    #tab-team .accounts-filter-v2 .jobs-tb-btn--primary:hover:not(:disabled) {
+      background: #5a94ff; border-color: #5a94ff; color: #fff;
+    }
+    #tab-team .accounts-filter-v2 .jobs-tb-btn--primary:disabled {
+      color: #9CBFFF; background: #EBF2FF; border-color: #D7E5FF;
+    }
+    #tab-team .accounts-filter-v2 .jobs-tb-btn--danger {
+      color: #e64545; background: #ffe0e0; border-color: #f89898;
+    }
+    #tab-team .accounts-filter-v2 .jobs-tb-btn--danger:hover:not(:disabled) {
+      background: #f56c6c; border-color: #f56c6c; color: #fff;
+    }
+    #tab-team .accounts-filter-v2 .jobs-tb-btn--danger:disabled {
+      color: #f3a6a6; background: #fff0f0; border-color: #fbc4c4;
+    }
+    #tab-team .accounts-filter-v2 .jobs-tb-btn--good {
+      color: #166534; background: #edf8f1; border-color: #b9dfc9;
+    }
+    #tab-team .accounts-filter-v2 .acc-v2-selected { color: #909399; font-size: 13px; font-weight: 600; padding: 0 4px; }
+    #tab-team .accounts-table-v2 { min-width: 920px; }
+    #tab-team .accounts-table-v2 .col-token { width: 88px; }
+    #tab-team .accounts-table-v2 .col-plan { width: 92px; }
+    #tab-team .accounts-table-v2 .col-status { width: 92px; }
+    #tab-team .accounts-table-v2 .col-transfer { width: 248px; white-space: normal; overflow: visible; }
+    #tab-team .accounts-table-v2 .col-actions { width: 88px; }
+    .team-import {
+      display: none; padding: 0 16px 16px;
+      border-bottom: 1px solid #ebeef5; background: #fafbfc;
+    }
+    .team-import.is-open { display: block; }
+    .team-import .team-field { padding-top: 4px; }
+    .team-import textarea {
+      min-height: 88px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; resize: vertical;
+    }
+    .team-hint { margin: 8px 0 0; color: #909399; font-size: 12px; line-height: 1.5; }
+    .team-import-actions { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+    .team-import-result { color: #606266; font-size: 13px; }
+    .team-gate {
+      display: none; margin: 0 16px 12px; padding: 8px 12px;
+      border: 1px solid #c3d4fb; border-radius: 8px; background: #eef4ff;
+      color: #1d4ed8; font-size: 13px; line-height: 1.45;
+    }
+    .team-gate.is-open { display: block; }
+    .team-empty {
+      text-align: center; padding: 36px 16px !important; white-space: normal !important;
+      color: #909399;
+    }
+    .team-empty strong { display: block; color: #303133; font-size: 14px; margin-bottom: 6px; }
+    .team-empty span { display: block; font-size: 13px; line-height: 1.5; }
+    .team-empty button { margin-top: 14px; }
+    .team-step {
+      display: flex; flex-direction: column; align-items: flex-start; gap: 6px; min-width: 0;
+    }
+    .team-step-rail { display: flex; align-items: center; gap: 0; }
+    .team-step-dot {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid #e4e7ed; background: #fff; color: #c0c4cc;
+      font-size: 10px; font-weight: 700; line-height: 1;
+    }
+    .team-step-join { width: 10px; height: 1px; background: #e4e7ed; }
+    .team-step-dot.is-done { background: #E7FCF8; border-color: #9ee0d6; color: #2bb8a6; }
+    .team-step-dot.is-run { background: #fff7e6; border-color: #ffd591; color: #d48806; }
+    .team-step-dot.is-fail { background: #fef0f0; border-color: #fbc4c4; color: #f56c6c; }
+    .team-step-label { color: #909399; font-size: 12px; line-height: 1.3; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+    .team-step-label.is-ok { color: #2bb8a6; }
+    .team-step-label.is-run { color: #d48806; }
+    .team-step-label.is-fail { color: #f56c6c; }
+    .team-log-live { color: #909399; font-size: 12px; font-weight: 500; }
+    .team-log-live.is-run { color: #d48806; }
+    @keyframes team-pulse {
+      0% { box-shadow: 0 0 0 0 rgba(250,140,22,.45); }
+      100% { box-shadow: 0 0 0 8px rgba(250,140,22,0); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .team-admin-dot.is-busy { animation: none; }
+    }
+    @media (max-width: 1100px) {
+      .team-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .team-flow-step:nth-child(2)::before { content: none; }
+      .team-admin-form { grid-template-columns: 1fr 1fr; }
+      .team-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 700px) {
+      .team-flow { grid-template-columns: 1fr; }
+      .team-flow-step + .team-flow-step::before { top: 0; bottom: auto; right: 18px; left: 18px; width: auto; height: 1px; }
+      .team-admin-form { grid-template-columns: 1fr; }
+      .team-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .team-otp { align-items: stretch; }
+      .team-otp-row { width: 100%; }
+      .team-otp-row input { flex: 1; width: auto; }
+    }
+
   </style>
 </head>
 <body>
@@ -2023,6 +2311,12 @@
         <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><path d="M22 6l-10 7L2 6"/>
       </svg>
       <span class="sidebar-item-label">邮箱池</span>
+    </button>
+    <button type="button" data-tab="team" class="sidebar-item">
+      <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+      <span class="sidebar-item-label">团队转移</span>
     </button>
     <button type="button" data-tab="config" class="sidebar-item">
       <svg class="sidebar-item-icon" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -2358,6 +2652,7 @@
       <div class="jobs-toolbar-v2" id="codexToolbarV2">
         <button type="button" class="jobs-tb-btn" id="showArchivedCodexV2" aria-pressed="false" title="默认只显示未归档凭证；开启后单独查看归档凭证">查看归档</button>
         <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnCodexDownloadBulkV2" disabled title="把选中的多个本地凭证打包成一个 JSON 文件下载（备份/迁移用，CPA 不能直接读，需先解包）">下载本地</button>
+        <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnCodexExportRtV2" disabled title="导出选中凭证的 refresh_token，每行：邮箱----RT">导出 RT</button>
         <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnCodexDownloadBulkCpaV2" disabled title="从 CPA auth-files 下载选中账号的真实 Codex JSON，并打包成 ZIP（可直接解压放入 CPA auth-dir）">从CPA下载</button>
         <button type="button" class="jobs-tb-btn" id="btnCodexArchiveBulkV2" disabled title="归档选中的 Codex 授权凭证；默认列表不再显示">归档选中</button>
         <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnCodexDeleteBulkV2" disabled title="删除选中的本地 Codex JSON 凭证文件">删除选中</button>
@@ -2482,6 +2777,173 @@
       </div>
     </div>
   </div>
+
+  <!-- ============ 团队转移 ============ -->
+  <div id="tab-team" class="hidden">
+    <div class="team-head">
+      <div>
+        <h1 class="register-title">团队转移</h1>
+        <p class="team-head-note">把子号并入 Team 工作区并去掉个人空间，此操作不可撤销。</p>
+      </div>
+    </div>
+
+    <ol class="team-flow" aria-label="转移四步">
+      <li class="team-flow-step">
+        <span class="team-flow-num" aria-hidden="true">1</span>
+        <div class="team-flow-copy">
+          <strong>邀请加入</strong>
+          <span>母号把子号拉进 Team</span>
+        </div>
+      </li>
+      <li class="team-flow-step">
+        <span class="team-flow-num" aria-hidden="true">2</span>
+        <div class="team-flow-copy">
+          <strong>接受邀请</strong>
+          <span>子号确认加入</span>
+        </div>
+      </li>
+      <li class="team-flow-step">
+        <span class="team-flow-num" aria-hidden="true">3</span>
+        <div class="team-flow-copy">
+          <strong>去除个人空间</strong>
+          <span>子号账户转到团队</span>
+        </div>
+      </li>
+      <li class="team-flow-step">
+        <span class="team-flow-num" aria-hidden="true">4</span>
+        <div class="team-flow-copy">
+          <strong>踢出子号</strong>
+          <span>母号移出成员，空间保留</span>
+        </div>
+      </li>
+    </ol>
+
+    <section class="accounts-panel-v2 team-admin-card" id="teamAdminCard" aria-label="母号登录">
+      <div class="team-admin-top">
+        <div class="team-admin-who">
+          <span class="team-admin-dot" id="teamAdminDot" aria-hidden="true"></span>
+          <div>
+            <strong id="teamAdminState">未登录</strong>
+            <span id="teamAdminStateHint">先登录 Team 管理员，才能开始转移</span>
+          </div>
+        </div>
+        <div class="team-admin-top-actions">
+          <div class="team-admin-chip hidden" id="teamAdminTeamLine">
+            <span>团队</span>
+            <code id="teamAdminTeamId">—</code>
+            <button type="button" id="btnCopyTeamId">复制</button>
+          </div>
+          <button type="button" class="jobs-tb-btn" id="btnTeamAdminLog" title="查看母号登录与转移日志">查看日志</button>
+        </div>
+      </div>
+      <form class="team-admin-form" id="teamAdminForm" autocomplete="off" onsubmit="return false;">
+        <label class="team-field" for="teamAdminEmail">
+          <span>母号邮箱</span>
+          <input id="teamAdminEmail" type="email" inputmode="email" autocomplete="username" spellcheck="false" placeholder="admin@example.com">
+        </label>
+        <label class="team-field" for="teamAdminPassword">
+          <span>密码</span>
+          <span class="team-field-input">
+            <input id="teamAdminPassword" type="password" autocomplete="current-password" placeholder="母号密码">
+            <button type="button" class="team-eye" id="btnTeamTogglePassword" aria-label="显示密码" aria-pressed="false" title="显示密码">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </span>
+        </label>
+        <label class="team-field" for="teamAdminTotp">
+          <span>TOTP 密钥 <em>可选</em></span>
+          <input id="teamAdminTotp" type="password" autocomplete="one-time-code" placeholder="仅身份器开启时填写" spellcheck="false">
+        </label>
+        <div class="team-admin-actions">
+          <button type="submit" class="jobs-tb-btn jobs-tb-btn--primary" id="btnTeamAdminLogin">登录母号</button>
+          <button type="button" class="jobs-tb-btn" id="btnTeamAdminReset" hidden>取消</button>
+        </div>
+      </form>
+      <div class="team-otp" id="teamAdminOtpRow" role="status">
+        <div class="team-otp-copy">
+          <strong>邮箱验证码</strong>
+          <span>验证码已发到母号邮箱，提交后继续登录</span>
+        </div>
+        <div class="team-otp-row">
+          <input id="teamAdminOtpInput" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="000000" aria-label="6 位邮箱验证码">
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnTeamSubmitOtp">提交验证码</button>
+        </div>
+      </div>
+      <div class="team-admin-error" id="teamAdminErrorLine" role="alert"></div>
+    </section>
+
+    <div class="team-metrics" aria-label="子号概览">
+      <div class="team-metric"><span>子号</span><strong id="teamStatTotal">0</strong></div>
+      <div class="team-metric" id="teamStatAtCard"><span>已有 AT</span><strong id="teamStatAt">0</strong></div>
+      <div class="team-metric" id="teamStatRunCard"><span>转移中</span><strong id="teamStatRun">0</strong></div>
+      <div class="team-metric" id="teamStatDoneCard"><span>已完成</span><strong id="teamStatDone">0</strong></div>
+    </div>
+
+    <section class="accounts-panel-v2" aria-label="子号列表">
+      <div class="accounts-filter-v2" id="teamChildrenToolbar">
+        <div class="acc-v2-btn-group acc-v2-search-wrap">
+          <input id="teamSearch" type="search" placeholder="搜索子号邮箱…" autocomplete="off" aria-label="搜索子号邮箱">
+        </div>
+        <div class="acc-v2-btn-group" role="group" aria-label="按状态筛选">
+          <button type="button" class="acc-v2-toggle is-active" data-team-filter="all" aria-pressed="true">全部</button>
+          <button type="button" class="acc-v2-toggle" data-team-filter="no_at" aria-pressed="false">无 AT</button>
+          <button type="button" class="acc-v2-toggle" data-team-filter="running" aria-pressed="false">转移中</button>
+          <button type="button" class="acc-v2-toggle" data-team-filter="failed" aria-pressed="false">失败</button>
+          <button type="button" class="acc-v2-toggle" data-team-filter="done" aria-pressed="false">已完成</button>
+        </div>
+        <div class="acc-v2-btn-group">
+          <span class="acc-v2-selected" id="teamSelectedHint">已选 0</span>
+          <button type="button" class="jobs-tb-btn" id="btnTeamToggleImport" aria-expanded="true">收起导入</button>
+          <button type="button" class="jobs-tb-btn" id="btnTeamRefresh">刷新</button>
+          <button type="button" class="jobs-tb-btn" id="btnTeamLoginSelected" disabled title="无 AT 的子号会走邮箱验证码，自动从收信 API 取码">提取 AT</button>
+          <button type="button" class="jobs-tb-btn" id="btnTeamCodexSelected" disabled title="给选中子号补跑 Codex 授权，将消耗邮箱验证码">Codex 授权</button>
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnTeamCodexExportRt" disabled title="导出选中子号的 Codex refresh_token，每行：邮箱----RT">导出 RT</button>
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnTeamTransferSelected" disabled title="邀请 → 接受 → 去除个人空间 → 踢出。不可撤销。">开始转移</button>
+        </div>
+      </div>
+      <div class="team-gate" id="teamGate" role="status"></div>
+      <div class="team-import is-open" id="teamImportPanel">
+        <label class="team-field" for="teamImportText">
+          <span>子号素材</span>
+          <textarea id="teamImportText" rows="5" placeholder="zoe_errorgq@mail.com----VW8CLVkAj&#10;second@mail.com----anotherPassword" aria-describedby="teamImportHint"></textarea>
+        </label>
+        <p class="team-hint" id="teamImportHint">每行一条：邮箱----收信密码。收信密码是 mail API 的密码，导入后用于登录和 Codex 授权自动取码。以 # 开头的行会忽略。</p>
+        <div class="team-import-actions">
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnTeamImportChildren">导入</button>
+          <span class="team-import-result" id="teamImportResult" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="accounts-table-v2-wrap" id="teamTableWrap">
+        <table class="accounts-table-v2">
+          <colgroup>
+            <col class="col-check"><col class="col-email"><col class="col-token">
+            <col class="col-plan"><col class="col-status"><col class="col-transfer"><col class="col-actions">
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="col-check"><input type="checkbox" id="teamSelectAll" title="全选当前页" aria-label="全选当前页子号"></th>
+              <th class="col-email">邮箱</th>
+              <th class="col-token">AT</th>
+              <th class="col-plan">套餐</th>
+              <th class="col-status">Codex</th>
+              <th class="col-transfer">转移</th>
+              <th class="col-actions">日志</th>
+            </tr>
+          </thead>
+          <tbody id="teamChildrenBody"></tbody>
+        </table>
+      </div>
+      <div class="jobs-v2-pager" id="pager-team"></div>
+    </section>
+
+    <div class="body hidden" id="teamLogPanel" role="dialog" aria-modal="true" aria-labelledby="teamLogTitle">
+      <h3 id="teamLogTitle"><span id="teamLogKindLabel">日志</span>：<span id="teamLogEmail" style="font-size:13px;font-weight:400;color:var(--muted);"></span>
+        <span class="team-log-live" id="teamLogLive"></span>
+        <button type="button" class="btn" id="btnCloseTeamLog">关闭</button>
+      </h3>
+      <div class="log" id="teamLogContent" tabindex="0">加载中…</div>
+    </div>
+  </div>
 </main>
 
 <div id="toast"></div>
@@ -2561,6 +3023,7 @@ const PAGERS = {
   accounts: { page: 1, size: 20 },
   outlook:  { page: 1, size: 20 },
   codex:    { page: 1, size: 20 },
+  team:     { page: 1, size: 20 },
 };
 
 function _renderPager(id, total) {
@@ -2580,18 +3043,20 @@ function _renderPager(id, total) {
   const el = document.getElementById('pager-' + id);
   if (el) el.innerHTML = html;
 
-  if (id === 'jobs' || id === 'accounts' || id === 'codex' || id === 'outlook') {
+  if (id === 'jobs' || id === 'accounts' || id === 'codex' || id === 'outlook' || id === 'team') {
     const elV2 = document.getElementById(
       id === 'jobs' ? 'pager-jobs-v2'
         : id === 'accounts' ? 'pager-accounts-v2'
         : id === 'codex' ? 'pager-codex-v2'
-        : 'pager-outlook-v2'
+        : id === 'outlook' ? 'pager-outlook-v2'
+        : 'pager-team'
     );
     if (elV2) {
       const sizeWrapId = id === 'jobs' ? 'jobsPagerSize'
         : id === 'accounts' ? 'accountsPagerSize'
         : id === 'codex' ? 'codexPagerSize'
-        : 'outlookPagerSize';
+        : id === 'outlook' ? 'outlookPagerSize'
+        : 'teamPagerSize';
       const v2Sizes = [10, 20, 30, 50, 100];
       const pages = [];
       let from = Math.max(1, p.page - 2);
@@ -2652,6 +3117,7 @@ function pagerGoTo(id, page) {
     : id === 'accounts' ? ACCOUNTS_TOTAL
     : id === 'outlook' ? OUTLOOK_TOTAL
     : id === 'codex' ? CODEX_TOTAL
+    : id === 'team' ? TEAM_LIST_TOTAL
     : (p.size || 20);
   const totalPages = Math.max(1, Math.ceil(Number(total || 0) / p.size) || 1);
   p.page = Math.max(1, Math.min(parseInt(page, 10) || 1, totalPages));
@@ -2662,7 +3128,7 @@ function pagerJump(id, val) {
 }
 
 function _reloadPagedList(id) {
-  ({ jobs: refreshJobs, accounts: loadAccounts, outlook: loadOutlook, codex: loadCodex })[id]?.();
+  ({ jobs: refreshJobs, accounts: loadAccounts, outlook: loadOutlook, codex: loadCodex, team: renderTeamChildren })[id]?.();
 }
 function pagerGo(id, dir) {
   PAGERS[id].page = Math.max(1, PAGERS[id].page + dir);
@@ -2751,6 +3217,14 @@ async function api(url, opts) {
   if (!r.ok) throw new Error(j.error || ('HTTP '+r.status));
   return j;
 }
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text || ''], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename || 'download.txt';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 800);
+}
 function debounce(fn, wait=250) {
   let t = null;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), wait); };
@@ -2758,7 +3232,7 @@ function debounce(fn, wait=250) {
 
 // ---------- Tab 切换 ----------
 function activateTab(tab, persist=true) {
-  const allowed = ['register','accounts','codex','outlook','config'];
+  const allowed = ['register','accounts','codex','outlook','team','config'];
   if (!allowed.includes(tab)) tab = 'register';
   $$('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === tab));
   allowed.forEach(t => $('#tab-'+t).classList.toggle('hidden', t !== tab));
@@ -2766,6 +3240,7 @@ function activateTab(tab, persist=true) {
   if (tab === 'accounts') loadAccounts();
   if (tab === 'codex') loadCodex();
   if (tab === 'outlook') loadOutlook();
+  if (tab === 'team') loadTeam();
   if (tab === 'config') loadConfig();
   if (tab === 'register') refreshJobs();
 }
@@ -2996,7 +3471,8 @@ function updateModalScrollLock() {
     || !$('#retryLogPanel').classList.contains('hidden')
     || !$('#liveLogPanel').classList.contains('hidden')
     || !$('#qrPanel').classList.contains('hidden')
-    || !$('#outlookImportModal').classList.contains('hidden');
+    || !$('#outlookImportModal').classList.contains('hidden')
+    || !$('#teamLogPanel').classList.contains('hidden');
   const locked = document.body.classList.contains('modal-open');
   if (opened && !locked) {
     modalScrollY = window.scrollY || document.documentElement.scrollTop || 0;
@@ -5389,7 +5865,7 @@ function _codexUpdateSelectedHint() {
     archiveBtn.textContent = CODEX_SHOW_ARCHIVED ? '恢复选中' : '归档选中';
     archiveBtn.title = CODEX_SHOW_ARCHIVED ? '把选中的归档凭证恢复到默认列表' : '归档选中的 Codex 授权凭证；默认列表不再显示';
   }
-  ['btnCodexDownloadBulkV2', 'btnCodexDownloadBulkCpaV2', 'btnCodexDeleteBulkV2'].forEach(id => {
+  ['btnCodexDownloadBulkV2', 'btnCodexExportRtV2', 'btnCodexDownloadBulkCpaV2', 'btnCodexDeleteBulkV2'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = none;
   });
@@ -5604,6 +6080,22 @@ function applyCodexArchivedFilter(on) {
   PAGERS.codex.page = 1;
   loadCodex();
 }
+async function codexExportRtSelected() {
+  if (CODEX_SELECTED.size === 0) return;
+  const filenames = Array.from(CODEX_SELECTED);
+  const btn = $('#btnCodexExportRtV2');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await exportCodexRt({ filenames });
+    const skipped = (r.skipped || []).length;
+    showToast(skipped ? `已导出 ${r.count} 条 RT，跳过 ${skipped} 个` : `已导出 ${r.count} 条 RT`);
+    setTimeout(loadCodex, 600);
+  } catch (err) {
+    showToast('导出 RT 失败: ' + err.message);
+  } finally {
+    _codexUpdateSelectedHint();
+  }
+}
 async function codexDownloadBulkLocal() {
   if (CODEX_SELECTED.size === 0) return;
   const filenames = Array.from(CODEX_SELECTED);
@@ -5725,6 +6217,7 @@ async function codexDeleteBulk() {
   });
   const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   bind('btnCodexDownloadBulkV2', codexDownloadBulkLocal);
+  bind('btnCodexExportRtV2', codexExportRtSelected);
   bind('btnCodexDownloadBulkCpaV2', codexDownloadBulkCpa);
   bind('btnCodexArchiveBulkV2', codexArchiveSelected);
   bind('btnCodexDeleteBulkV2', codexDeleteBulk);
@@ -6631,6 +7124,748 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-copy-id]');
   if (!t) return;
   copyText(copyStore.get(t.dataset.copyId));
+});
+
+// ---------- 团队转移 ----------
+const TEAM_STATE_LABELS = {
+  idle: '未登录',
+  logging_in: '登录中',
+  waiting_otp: '等待邮箱验证码',
+  logged_in: '已登录',
+  failed: '登录失败',
+};
+const TEAM_STATE_HINTS = {
+  idle: '先登录 Team 管理员，才能开始转移',
+  logging_in: '正在登录母号，请稍候',
+  waiting_otp: '验证码已发送，在下方输入后继续',
+  logged_in: '母号已就绪，勾选子号后可以开始转移',
+  failed: '登录失败，检查邮箱密码后重试',
+};
+const TEAM_STEP_ORDER = ['invited', 'accepted', 'transferred', 'kicked'];
+const TEAM_STEP_LABELS = {
+  invited: '邀请',
+  accepted: '接受',
+  transferred: '转移',
+  kicked: '踢出',
+};
+const TEAM_STEP_SHORT = { invited: '邀', accepted: '接', transferred: '转', kicked: '踢' };
+let TEAM_CHILDREN = [];
+let TEAM_SELECTED = new Set();
+let TEAM_POLL_TIMER = null;
+let TEAM_LOG_EMAIL = null;
+let TEAM_LOG_TIMER = null;
+let TEAM_ADMIN = { state: 'idle' };
+let TEAM_FILTER = 'all';
+let TEAM_QUERY = '';
+let TEAM_LIST_TOTAL = 0;
+let TEAM_IMPORT_OPEN = true;
+let TEAM_OTP_FOCUSED = false;
+
+function teamFiltered() {
+  const q = TEAM_QUERY.trim().toLowerCase();
+  return TEAM_CHILDREN.filter(c => {
+    if (q && !String(c.email || '').toLowerCase().includes(q)) return false;
+    const st = c.team_transfer_status;
+    if (TEAM_FILTER === 'no_at') return !c.has_access_token;
+    if (TEAM_FILTER === 'running') return st === 'queued' || st === 'running';
+    if (TEAM_FILTER === 'failed') return st === 'failed';
+    if (TEAM_FILTER === 'done') return st === 'success';
+    return true;
+  });
+}
+
+function teamPageRows() {
+  const list = teamFiltered();
+  TEAM_LIST_TOTAL = list.length;
+  const p = PAGERS.team;
+  const totalPages = Math.max(1, Math.ceil(list.length / p.size));
+  if (p.page > totalPages) p.page = totalPages;
+  return list.slice((p.page - 1) * p.size, p.page * p.size);
+}
+
+function teamAdminReady() {
+  return TEAM_ADMIN.state === 'logged_in' && !!TEAM_ADMIN.team_account_id;
+}
+
+function teamStepView(status, step, error) {
+  const doneAll = status === 'success';
+  const failed = status === 'failed';
+  const queued = status === 'queued';
+  const running = status === 'running';
+  const idx = TEAM_STEP_ORDER.indexOf(step);
+  const dots = TEAM_STEP_ORDER.map((s, i) => {
+    let cls = 'is-todo';
+    if (doneAll || (idx >= 0 && i < idx)) cls = 'is-done';
+    else if (failed && s === step) cls = 'is-fail';
+    else if ((running && (s === step || (idx < 0 && i === 0))) || (queued && i === 0)) cls = 'is-run';
+    return `<span class="team-step-dot ${cls}" title="${TEAM_STEP_LABELS[s]}">${TEAM_STEP_SHORT[s]}</span>`;
+  }).join('<span class="team-step-join" aria-hidden="true"></span>');
+  let label = '未开始';
+  let labelCls = '';
+  if (doneAll) { label = '已完成'; labelCls = 'is-ok'; }
+  else if (queued) { label = '排队中'; labelCls = 'is-run'; }
+  else if (running) { label = idx >= 0 ? `进行中 · ${TEAM_STEP_LABELS[step]}` : '进行中'; labelCls = 'is-run'; }
+  else if (failed) { label = `失败 · ${TEAM_STEP_LABELS[step] || '未知步骤'}`; labelCls = 'is-fail'; }
+  const err = error ? ` title="${esc(error)}"` : '';
+  return `<div class="team-step"${err}><div class="team-step-rail" aria-hidden="true">${dots}</div><div class="team-step-label ${labelCls}">${esc(label)}</div></div>`;
+}
+
+function renderTeamMetrics() {
+  const total = TEAM_CHILDREN.length;
+  const at = TEAM_CHILDREN.filter(c => c.has_access_token).length;
+  const run = TEAM_CHILDREN.filter(c => c.team_transfer_status === 'queued' || c.team_transfer_status === 'running').length;
+  const done = TEAM_CHILDREN.filter(c => c.team_transfer_status === 'success').length;
+  const fail = TEAM_CHILDREN.filter(c => c.team_transfer_status === 'failed').length;
+  const set = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = String(n); };
+  set('teamStatTotal', total);
+  set('teamStatAt', at);
+  set('teamStatRun', run);
+  set('teamStatDone', done);
+  const atCard = $('#teamStatAtCard');
+  const runCard = $('#teamStatRunCard');
+  const doneCard = $('#teamStatDoneCard');
+  if (atCard) atCard.classList.toggle('is-warn', total > 0 && at < total);
+  if (runCard) runCard.classList.toggle('is-run', run > 0);
+  if (doneCard) {
+    doneCard.classList.toggle('is-ok', done > 0 && fail === 0);
+    doneCard.classList.toggle('is-fail', fail > 0);
+    const label = doneCard.querySelector('span');
+    if (label) label.textContent = fail > 0 ? `已完成 / 失败 ${fail}` : '已完成';
+  }
+}
+
+function setTeamImportOpen(open) {
+  TEAM_IMPORT_OPEN = !!open;
+  $('#teamImportPanel')?.classList.toggle('is-open', TEAM_IMPORT_OPEN);
+  const btn = $('#btnTeamToggleImport');
+  if (btn) {
+    btn.setAttribute('aria-expanded', TEAM_IMPORT_OPEN ? 'true' : 'false');
+    btn.textContent = TEAM_IMPORT_OPEN ? '收起导入' : '导入子号';
+  }
+  renderTeamChildren();
+}
+
+function syncTeamEmptyLayout() {
+  const empty = !TEAM_CHILDREN.length;
+  const wrap = $('#teamTableWrap');
+  const pager = $('#pager-team');
+  if (wrap) wrap.hidden = empty && TEAM_IMPORT_OPEN;
+  if (pager) pager.hidden = empty;
+}
+
+function updateTeamSelectionUi() {
+  const n = TEAM_SELECTED.size;
+  const hint = $('#teamSelectedHint');
+  if (hint) hint.textContent = `已选 ${n}`;
+  const ready = teamAdminReady();
+  const selected = teamSelectedAccounts();
+  const missingAt = selected.filter(c => !c.has_access_token).length;
+  const loginBtn = $('#btnTeamLoginSelected');
+  const codexBtn = $('#btnTeamCodexSelected');
+  const exportRtBtn = $('#btnTeamCodexExportRt');
+  const transferBtn = $('#btnTeamTransferSelected');
+  if (loginBtn) loginBtn.disabled = n === 0;
+  if (codexBtn) codexBtn.disabled = n === 0;
+  if (exportRtBtn) exportRtBtn.disabled = n === 0;
+  if (transferBtn) {
+    const blocked = n === 0 || !ready || missingAt === n;
+    transferBtn.disabled = blocked;
+    transferBtn.title = !ready
+      ? '请先登录母号'
+      : n === 0
+        ? '请先勾选子号'
+        : missingAt === n
+          ? '选中的子号都没有 AT，请先提取 AT'
+          : missingAt
+            ? `邀请 → 接受 → 去除个人空间 → 踢出。将跳过 ${missingAt} 个无 AT 的子号。不可撤销。`
+            : '邀请 → 接受 → 去除个人空间 → 踢出。不可撤销。';
+  }
+  const gate = $('#teamGate');
+  if (gate) {
+    let msg = '';
+    if (!ready && n > 0) msg = '母号尚未登录。登录成功后才能开始转移。';
+    else if (ready && n > 0 && missingAt === n) msg = '选中的子号都还没有 AT。先点「提取 AT」，再开始转移。';
+    else if (ready && missingAt > 0 && n > missingAt) msg = `选中 ${n} 个，其中 ${missingAt} 个没有 AT，开始转移时会跳过它们。`;
+    gate.textContent = msg;
+    gate.classList.toggle('is-open', !!msg);
+  }
+  const all = document.getElementById('teamSelectAll');
+  if (all) {
+    const pageIds = teamPageRows().map(c => c.id);
+    all.checked = pageIds.length > 0 && pageIds.every(id => TEAM_SELECTED.has(id));
+    all.indeterminate = pageIds.some(id => TEAM_SELECTED.has(id)) && !all.checked;
+    all.disabled = pageIds.length === 0;
+  }
+}
+
+function teamSelectedAccounts() {
+  const ids = TEAM_SELECTED;
+  return TEAM_CHILDREN.filter(c => ids.has(c.id));
+}
+
+function renderTeamChildren() {
+  const body = $('#teamChildrenBody');
+  if (!body) return;
+  renderTeamMetrics();
+  const thead = body.closest('table')?.querySelector('thead');
+  const filtered = teamFiltered();
+  if (thead) thead.hidden = !TEAM_CHILDREN.length;
+  if (!TEAM_CHILDREN.length) {
+    TEAM_LIST_TOTAL = 0;
+    if (TEAM_IMPORT_OPEN) {
+      body.innerHTML = '';
+    } else {
+      body.innerHTML = `<tr><td class="team-empty" colspan="7">
+        <strong>还没有子号</strong>
+        <span>导入「邮箱----收信密码」，再提取 AT 后即可转移。</span>
+        <button type="button" class="jobs-tb-btn jobs-tb-btn--primary" id="btnTeamEmptyImport">导入子号</button>
+      </td></tr>`;
+    }
+    _renderPager('team', 0);
+    updateTeamSelectionUi();
+    syncTeamEmptyLayout();
+    return;
+  }
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td class="team-empty" colspan="7">
+      <strong>没有匹配的子号</strong>
+      <span>试试清空搜索，或换一个状态筛选。</span>
+    </td></tr>`;
+    TEAM_LIST_TOTAL = 0;
+    _renderPager('team', 0);
+    updateTeamSelectionUi();
+    syncTeamEmptyLayout();
+    return;
+  }
+  const rows = teamPageRows();
+  body.innerHTML = rows.map(c => {
+    const checked = TEAM_SELECTED.has(c.id) ? ' checked' : '';
+    const atBadge = c.has_access_token
+      ? '<span class="acc-v2-twofa-badge">有 AT</span>'
+      : '<span class="acc-v2-muted">无</span>';
+    const codexBadge = c.codex_status === 'success'
+      ? '<span class="acc-v2-twofa-badge">成功</span>'
+      : (c.codex_status
+        ? `<span class="acc-v2-twofa-badge" style="border-color:#f1c9a5;background:#fdf3e7;color:#c26d21;">${esc(c.codex_status)}</span>`
+        : '<span class="acc-v2-muted">—</span>');
+    return `<tr>
+      <td class="col-check"><input type="checkbox" class="team-child-check" data-team-id="${c.id}"${checked} aria-label="选择 ${esc(c.email || '')}"></td>
+      <td class="col-email"><div class="acc-v2-email" title="${esc(c.email || '')}">${esc(c.email || '')}</div><div class="acc-v2-sub">#${c.id}</div></td>
+      <td class="col-token">${atBadge}</td>
+      <td class="col-plan">${esc(c.plan_type || c.current_plan_type || '—')}</td>
+      <td class="col-status">${codexBadge}</td>
+      <td class="col-transfer">${teamStepView(c.team_transfer_status, c.team_transfer_step, c.team_transfer_error)}</td>
+      <td class="col-actions"><button type="button" class="jobs-tb-btn" data-team-log="${esc(c.email || '')}">日志</button></td>
+    </tr>`;
+  }).join('');
+  _renderPager('team', TEAM_LIST_TOTAL);
+  updateTeamSelectionUi();
+  syncTeamEmptyLayout();
+}
+
+async function loadTeam() {
+  startTeamPoll();
+  try {
+    const status = await api('/api/team/status');
+    renderTeamAdmin(status.admin || {});
+    TEAM_CHILDREN = (status.children || []).map(c => ({
+      ...c,
+      id: c.id || c.account_id,
+      team_transfer_status: c.team_transfer_status || c.status || '',
+      team_transfer_step: c.team_transfer_step || c.step || '',
+      team_transfer_error: c.team_transfer_error || c.error || '',
+    }));
+    const validIds = new Set(TEAM_CHILDREN.map(c => c.id));
+    TEAM_SELECTED = new Set([...TEAM_SELECTED].filter(id => validIds.has(id)));
+    renderTeamChildren();
+  } catch (e) {
+    renderTeamAdmin({});
+    const body = $('#teamChildrenBody');
+    if (body) {
+      body.innerHTML = `<tr><td class="team-empty" colspan="7"><strong>加载失败</strong><span>${esc(e.message || '请刷新后重试')}</span></td></tr>`;
+      const wrap = $('#teamTableWrap');
+      if (wrap) wrap.hidden = false;
+    }
+  }
+}
+
+function renderTeamAdmin(admin) {
+  TEAM_ADMIN = admin || { state: 'idle' };
+  const state = TEAM_ADMIN.state || 'idle';
+  const stateEl = $('#teamAdminState');
+  const hintEl = $('#teamAdminStateHint');
+  const dot = $('#teamAdminDot');
+  if (stateEl) stateEl.textContent = TEAM_STATE_LABELS[state] || state;
+  if (hintEl) hintEl.textContent = TEAM_ADMIN.email && state !== 'idle'
+    ? `${TEAM_STATE_HINTS[state] || ''} · ${TEAM_ADMIN.email}`
+    : (TEAM_STATE_HINTS[state] || '');
+  if (dot) {
+    dot.classList.remove('is-busy', 'is-ok', 'is-fail');
+    if (state === 'logging_in' || state === 'waiting_otp') dot.classList.add('is-busy');
+    else if (state === 'logged_in') dot.classList.add('is-ok');
+    else if (state === 'failed') dot.classList.add('is-fail');
+  }
+  const teamLine = $('#teamAdminTeamLine');
+  const teamId = $('#teamAdminTeamId');
+  if (teamLine && teamId) {
+    if (TEAM_ADMIN.team_account_id) {
+      teamLine.classList.remove('hidden');
+      teamId.textContent = TEAM_ADMIN.team_account_id;
+    } else {
+      teamLine.classList.add('hidden');
+    }
+  }
+  const errLine = $('#teamAdminErrorLine');
+  if (errLine) {
+    if (TEAM_ADMIN.error) {
+      errLine.textContent = TEAM_ADMIN.error;
+      errLine.classList.add('is-open');
+    } else {
+      errLine.classList.remove('is-open');
+      errLine.textContent = '';
+    }
+  }
+  const otpRow = $('#teamAdminOtpRow');
+  const waitingOtp = state === 'waiting_otp';
+  if (otpRow) otpRow.classList.toggle('is-open', waitingOtp);
+  if (waitingOtp && !TEAM_OTP_FOCUSED) {
+    TEAM_OTP_FOCUSED = true;
+    const otp = $('#teamAdminOtpInput');
+    if (otp) { otp.focus(); otp.select(); }
+  }
+  if (!waitingOtp) TEAM_OTP_FOCUSED = false;
+  const loginBtn = $('#btnTeamAdminLogin');
+  if (loginBtn) {
+    loginBtn.disabled = state === 'logging_in' || state === 'waiting_otp';
+    loginBtn.textContent = state === 'logging_in' ? '登录中…' : '登录母号';
+  }
+  const resetBtn = $('#btnTeamAdminReset');
+  if (resetBtn) {
+    const show = state !== 'idle';
+    resetBtn.hidden = !show;
+    resetBtn.classList.toggle('hidden', !show);
+    resetBtn.textContent = state === 'logged_in' ? '退出登录' : (state === 'failed' ? '重置' : '取消');
+  }
+  const creds = $('#teamAdminForm');
+  if (creds) creds.style.display = state === 'logged_in' ? 'none' : '';
+  updateTeamSelectionUi();
+}
+
+async function teamAdminLogin() {
+  const email = ($('#teamAdminEmail')?.value || '').trim();
+  const password = $('#teamAdminPassword')?.value || '';
+  const totp = ($('#teamAdminTotp')?.value || '').trim();
+  if (!email || !password) {
+    showToast('请填写母号邮箱和密码');
+    ($('#teamAdminEmail')?.value || '').trim() ? $('#teamAdminPassword')?.focus() : $('#teamAdminEmail')?.focus();
+    return;
+  }
+  const btn = $('#btnTeamAdminLogin');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/team/admin-login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, totp_secret: totp }),
+    });
+    if (r.ok || r.accepted) {
+      showToast('正在登录母号');
+      renderTeamAdmin({ state: 'logging_in', email, error: null });
+      openTeamLog(email, 'admin');
+      startTeamPoll(true);
+    } else {
+      showToast(r.error || '登录启动失败');
+      if (btn) btn.disabled = false;
+    }
+  } catch (e) {
+    showToast(e.message);
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function teamAdminReset() {
+  const state = TEAM_ADMIN.state;
+  const msg = state === 'logged_in' ? '退出后需要重新登录母号才能转移，确定退出？' : '确定取消当前母号登录？';
+  if (!confirm(msg)) return;
+  try {
+    await api('/api/team/admin-reset', { method: 'POST' });
+    showToast(state === 'logged_in' ? '母号已退出' : '已取消登录');
+    renderTeamAdmin({ state: 'idle' });
+  } catch (e) { showToast(e.message); }
+}
+
+async function teamSubmitOtp() {
+  const input = $('#teamAdminOtpInput');
+  const code = (input?.value || '').trim();
+  if (!code) { showToast('请输入验证码'); input?.focus(); return; }
+  const btn = $('#btnTeamSubmitOtp');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/team/admin-otp', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    if (r.ok) { showToast('验证码已提交'); if (input) input.value = ''; }
+    else showToast(r.error || '提交失败');
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    if (btn) btn.disabled = false;
+    startTeamPoll(true);
+  }
+}
+
+async function teamImportChildren() {
+  const text = $('#teamImportText')?.value || '';
+  if (!text.trim()) { showToast('请粘贴子号素材'); $('#teamImportText')?.focus(); return; }
+  const btn = $('#btnTeamImportChildren');
+  if (btn) btn.disabled = true;
+  const result = $('#teamImportResult');
+  if (result) result.textContent = '导入中…';
+  try {
+    const r = await api('/api/team/import-children', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const summary = `新增 ${r.inserted || 0}，更新 ${r.updated || 0}，跳过 ${r.skipped || 0}${r.invalid ? `，无效 ${r.invalid}` : ''}`;
+    showToast(`导入完成：${summary}`);
+    if (result) result.textContent = summary;
+    $('#teamImportText').value = '';
+    if ((r.inserted || 0) + (r.updated || 0) > 0) {
+      TEAM_IMPORT_OPEN = false;
+      $('#teamImportPanel')?.classList.remove('is-open');
+      const toggle = $('#btnTeamToggleImport');
+      if (toggle) {
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.textContent = '导入子号';
+      }
+    }
+    await loadTeam();
+  } catch (e) {
+    showToast(e.message);
+    if (result) result.textContent = e.message;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function teamSelectedIds() {
+  return [...TEAM_SELECTED];
+}
+
+function setBusy(btn, busy, label) {
+  if (!btn) return;
+  if (busy) {
+    btn.dataset.label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = label;
+  } else {
+    btn.disabled = false;
+    btn.textContent = btn.dataset.label || label;
+  }
+}
+
+async function teamLoginSelected() {
+  const ids = teamSelectedIds();
+  if (!ids.length) { showToast('请先勾选子号'); return; }
+  if (!confirm(`对选中的 ${ids.length} 个子号提取 AT？没有 AT 的账号会走邮箱验证码（自动取码）。`)) return;
+  const btn = $('#btnTeamLoginSelected');
+  setBusy(btn, true, '入队中…');
+  try {
+    const r = await api('/api/accounts/check-live-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_ids: ids }),
+    });
+    showToast(r.message || `已入队 ${r.started_count || 0} 个登录任务`);
+    if (r.started && r.started[0]) openTeamLog(r.started[0].email, 'live');
+    loadTeam();
+  } catch (e) { showToast(e.message); }
+  finally { setBusy(btn, false, '提取 AT'); }
+}
+
+async function teamCodexSelected() {
+  const ids = teamSelectedIds();
+  if (!ids.length) { showToast('请先勾选子号'); return; }
+  if (!confirm(`给选中的 ${ids.length} 个子号补跑 Codex 授权？会消耗邮箱验证码。`)) return;
+  const btn = $('#btnTeamCodexSelected');
+  setBusy(btn, true, '入队中…');
+  try {
+    const r = await api('/api/codex/retry-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_ids: ids }),
+    });
+    const skippedCount = (r.skipped || []).length;
+    showToast(skippedCount
+      ? `已开始 ${r.started_count || 0} 个，跳过 ${skippedCount} 个`
+      : (r.message || `已入队 ${r.started_count || 0} 个 Codex 补跑`));
+    const first = (r.started || [])[0];
+    if (first && first.email) openTeamLog(first.email, 'retry');
+    loadTeam();
+  } catch (e) { showToast(e.message); }
+  finally { setBusy(btn, false, 'Codex 授权'); }
+}
+
+async function exportCodexRt(body) {
+  const r = await api('/api/codex/export-rt', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  downloadTextFile(r.filename || 'codex-rt.txt', r.text || '');
+  return r;
+}
+
+async function teamExportCodexRt() {
+  const ids = teamSelectedIds();
+  if (!ids.length) { showToast('请先勾选子号'); return; }
+  const btn = $('#btnTeamCodexExportRt');
+  setBusy(btn, true, '导出中…');
+  try {
+    const r = await exportCodexRt({ account_ids: ids });
+    const skipped = (r.skipped || []).length;
+    showToast(skipped ? `已导出 ${r.count} 条 RT，跳过 ${skipped} 个` : `已导出 ${r.count} 条 RT`);
+  } catch (e) { showToast(e.message); }
+  finally { setBusy(btn, false, '导出 RT'); }
+}
+
+async function teamTransferSelected() {
+  const ids = teamSelectedIds();
+  if (!ids.length) { showToast('请先勾选子号'); return; }
+  if (!teamAdminReady()) { showToast('请先登录母号'); return; }
+  const missingAt = teamSelectedAccounts().filter(c => !c.has_access_token).length;
+  const readyCount = ids.length - missingAt;
+  if (readyCount <= 0) { showToast('选中的子号都没有 AT，请先提取 AT'); return; }
+  const extra = missingAt ? `\n其中 ${missingAt} 个没有 AT，将被跳过。` : '';
+  if (!confirm(`对 ${readyCount} 个子号执行团队转移（邀请 → 接受 → 去除个人空间 → 踢出）？\n该操作会移除子号的个人空间，且不可撤销。${extra}`)) return;
+  const btn = $('#btnTeamTransferSelected');
+  setBusy(btn, true, '入队中…');
+  try {
+    const r = await api('/api/team/transfer-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_ids: ids }),
+    });
+    const started = r.started_count || 0;
+    const skipped = r.skipped_count || 0;
+    if (started && skipped) showToast(`已入队 ${started} 个，跳过 ${skipped} 个（缺 AT 或已有任务）`);
+    else if (started) showToast(r.message || `已入队 ${started} 个转移任务`);
+    else showToast(r.error || `没有任务入队${skipped ? `，跳过 ${skipped} 个` : ''}`);
+    if (started) openTeamLog(TEAM_ADMIN.email || '', 'transfer');
+    loadTeam();
+  } catch (e) { showToast(e.message); }
+  finally { setBusy(btn, false, '开始转移'); }
+}
+
+function startTeamPoll(fast) {
+  clearInterval(TEAM_POLL_TIMER);
+  const tick = () => {
+    if ($('#tab-team').classList.contains('hidden')) { clearInterval(TEAM_POLL_TIMER); return; }
+    refreshTeamStatus();
+  };
+  const busy = fast || TEAM_ADMIN.state === 'logging_in' || TEAM_ADMIN.state === 'waiting_otp';
+  TEAM_POLL_TIMER = setInterval(tick, busy ? 2000 : 5000);
+}
+
+async function refreshTeamStatus() {
+  try {
+    const r = await api('/api/team/status');
+    const prev = TEAM_ADMIN.state;
+    renderTeamAdmin(r.admin || {});
+    if ((r.admin || {}).state !== prev && ((r.admin || {}).state === 'logged_in' || (r.admin || {}).state === 'failed')) {
+      startTeamPoll();
+    }
+    const incoming = r.children || [];
+    if (incoming.length !== TEAM_CHILDREN.length) {
+      TEAM_CHILDREN = incoming.map(c => ({
+        ...c,
+        id: c.id || c.account_id,
+        team_transfer_status: c.team_transfer_status || c.status || '',
+        team_transfer_step: c.team_transfer_step || c.step || '',
+        team_transfer_error: c.team_transfer_error || c.error || '',
+      }));
+      const validIds = new Set(TEAM_CHILDREN.map(c => c.id));
+      TEAM_SELECTED = new Set([...TEAM_SELECTED].filter(id => validIds.has(id)));
+      renderTeamChildren();
+      return;
+    }
+    const map = new Map(incoming.map(x => [x.id || x.account_id, x]));
+    let changed = false;
+    TEAM_CHILDREN.forEach(c => {
+      const s = map.get(c.id);
+      if (!s) return;
+      const status = s.team_transfer_status || s.status || '';
+      const step = s.team_transfer_step || s.step || '';
+      const error = s.team_transfer_error || s.error || '';
+      if (c.team_transfer_status !== status || c.team_transfer_step !== step || c.team_transfer_error !== error
+          || c.has_access_token !== s.has_access_token || c.codex_status !== s.codex_status) {
+        c.team_transfer_status = status;
+        c.team_transfer_step = step;
+        c.team_transfer_error = error;
+        if (typeof s.has_access_token === 'boolean') c.has_access_token = s.has_access_token;
+        if (s.codex_status != null) c.codex_status = s.codex_status;
+        changed = true;
+      }
+    });
+    if (changed) renderTeamChildren();
+    else renderTeamMetrics();
+  } catch (e) {}
+}
+
+let TEAM_LOG_KIND = 'transfer';
+let TEAM_LOG_SEEN_RUNNING = false;
+let TEAM_LOG_WAIT_POLLS = 0;
+const TEAM_LOG_LABELS = { live: '提取 AT 日志', retry: 'Codex 日志', transfer: '转移日志', admin: '母号日志' };
+
+function teamAdminLogEmail() {
+  return (TEAM_ADMIN.email || $('#teamAdminEmail')?.value || '').trim();
+}
+
+function openAdminLog() {
+  const email = teamAdminLogEmail();
+  if (!email) { showToast('请先填写母号邮箱'); $('#teamAdminEmail')?.focus(); return; }
+  openTeamLog(email, 'admin');
+}
+
+function teamLogUrl(email) {
+  const q = encodeURIComponent(email || '');
+  if (TEAM_LOG_KIND === 'live') return `/api/accounts/live-check-log?email=${q}`;
+  if (TEAM_LOG_KIND === 'retry') return `/api/codex/retry-log?email=${q}`;
+  return `/api/team/transfer-log?email=${q}`;
+}
+
+function teamLogFetchEmail() {
+  if (TEAM_LOG_KIND === 'transfer' || TEAM_LOG_KIND === 'admin') return TEAM_ADMIN.email || TEAM_LOG_EMAIL;
+  return TEAM_LOG_EMAIL;
+}
+
+function openTeamLog(email, kind) {
+  TEAM_LOG_KIND = kind || 'transfer';
+  TEAM_LOG_EMAIL = email;
+  TEAM_LOG_SEEN_RUNNING = false;
+  TEAM_LOG_WAIT_POLLS = 0;
+  const kindLabel = $('#teamLogKindLabel');
+  if (kindLabel) kindLabel.textContent = TEAM_LOG_LABELS[TEAM_LOG_KIND] || '日志';
+  $('#teamLogEmail').textContent = email || TEAM_ADMIN.email || '';
+  $('#teamLogLive').textContent = '同步中';
+  $('#teamLogLive').classList.add('is-run');
+  $('#teamLogPanel').classList.remove('hidden');
+  $('#teamLogContent').textContent = '加载中…';
+  updateModalScrollLock();
+  pollTeamLog();
+  clearInterval(TEAM_LOG_TIMER);
+  TEAM_LOG_TIMER = setInterval(pollTeamLog, 2000);
+  $('#btnCloseTeamLog')?.focus();
+}
+
+function closeTeamLog() {
+  clearInterval(TEAM_LOG_TIMER);
+  TEAM_LOG_EMAIL = null;
+  TEAM_LOG_SEEN_RUNNING = false;
+  TEAM_LOG_WAIT_POLLS = 0;
+  $('#teamLogPanel').classList.add('hidden');
+  updateModalScrollLock();
+}
+
+async function pollTeamLog() {
+  if (!TEAM_LOG_EMAIL && TEAM_LOG_KIND !== 'transfer') return;
+  const email = teamLogFetchEmail();
+  if (!email) return;
+  try {
+    const r = await api(teamLogUrl(email));
+    const c = $('#teamLogContent');
+    const atBottom = c.scrollTop + c.clientHeight >= c.scrollHeight - 30;
+    c.textContent = r.log || '暂无日志，等待任务写入…';
+    if (atBottom) c.scrollTop = c.scrollHeight;
+    const live = $('#teamLogLive');
+    if (r.running) {
+      TEAM_LOG_SEEN_RUNNING = true;
+      TEAM_LOG_WAIT_POLLS = 0;
+      if (live) { live.textContent = '进行中'; live.classList.add('is-run'); }
+      return;
+    }
+    const canEnd = TEAM_LOG_SEEN_RUNNING || TEAM_LOG_WAIT_POLLS >= 5;
+    if (!canEnd) {
+      TEAM_LOG_WAIT_POLLS += 1;
+      if (live) { live.textContent = '同步中'; live.classList.add('is-run'); }
+      return;
+    }
+    if (live) { live.textContent = '已结束'; live.classList.remove('is-run'); }
+    clearInterval(TEAM_LOG_TIMER);
+    loadTeam();
+  } catch (e) {}
+}
+
+$('#btnCloseTeamLog')?.addEventListener('click', closeTeamLog);
+$('#btnTeamAdminLog')?.addEventListener('click', openAdminLog);
+$('#teamAdminForm')?.addEventListener('submit', (e) => { e.preventDefault(); teamAdminLogin(); });
+$('#btnTeamAdminReset')?.addEventListener('click', teamAdminReset);
+$('#btnTeamSubmitOtp')?.addEventListener('click', teamSubmitOtp);
+$('#teamAdminOtpInput')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); teamSubmitOtp(); } });
+$('#btnTeamImportChildren')?.addEventListener('click', teamImportChildren);
+$('#btnTeamRefresh')?.addEventListener('click', loadTeam);
+$('#btnTeamLoginSelected')?.addEventListener('click', teamLoginSelected);
+$('#btnTeamCodexSelected')?.addEventListener('click', teamCodexSelected);
+$('#btnTeamCodexExportRt')?.addEventListener('click', teamExportCodexRt);
+$('#btnTeamTransferSelected')?.addEventListener('click', teamTransferSelected);
+$('#btnTeamToggleImport')?.addEventListener('click', () => setTeamImportOpen(!TEAM_IMPORT_OPEN));
+$('#btnCopyTeamId')?.addEventListener('click', () => {
+  const id = TEAM_ADMIN.team_account_id;
+  if (id) copyText(id);
+});
+$('#btnTeamTogglePassword')?.addEventListener('click', () => {
+  const input = $('#teamAdminPassword');
+  const btn = $('#btnTeamTogglePassword');
+  if (!input || !btn) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+  btn.setAttribute('aria-label', show ? '隐藏密码' : '显示密码');
+  btn.title = show ? '隐藏密码' : '显示密码';
+});
+$('#teamSearch')?.addEventListener('input', debounce(() => {
+  TEAM_QUERY = $('#teamSearch').value || '';
+  PAGERS.team.page = 1;
+  renderTeamChildren();
+}, 180));
+document.querySelectorAll('[data-team-filter]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    TEAM_FILTER = btn.dataset.teamFilter || 'all';
+    document.querySelectorAll('[data-team-filter]').forEach(b => {
+      const on = b === btn;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    PAGERS.team.page = 1;
+    renderTeamChildren();
+  });
+});
+$('#teamChildrenBody')?.addEventListener('click', (e) => {
+  const emptyBtn = e.target.closest('#btnTeamEmptyImport');
+  if (emptyBtn) { setTeamImportOpen(true); $('#teamImportText')?.focus(); return; }
+  const logBtn = e.target.closest('[data-team-log]');
+  if (logBtn) {
+    const email = logBtn.dataset.teamLog;
+    const acc = TEAM_CHILDREN.find(c => c.email === email);
+    const st = String(acc?.team_transfer_status || '');
+    const kind = (st && st !== '') ? 'transfer' : 'live';
+    openTeamLog(email, kind);
+  }
+});
+$('#teamChildrenBody')?.addEventListener('change', (e) => {
+  const box = e.target.closest('.team-child-check');
+  if (!box) return;
+  const id = parseInt(box.dataset.teamId, 10);
+  if (box.checked) TEAM_SELECTED.add(id);
+  else TEAM_SELECTED.delete(id);
+  updateTeamSelectionUi();
+});
+$('#teamSelectAll')?.addEventListener('change', (e) => {
+  teamPageRows().forEach(c => {
+    if (e.target.checked) TEAM_SELECTED.add(c.id);
+    else TEAM_SELECTED.delete(c.id);
+  });
+  updateTeamSelectionUi();
+  renderTeamChildren();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#teamLogPanel').classList.contains('hidden')) closeTeamLog();
 });
 
 // ---------- 初始化 ----------

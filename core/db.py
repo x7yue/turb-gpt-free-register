@@ -84,6 +84,8 @@ def _sqlite_conn() -> sqlite3.Connection:
 
 def _active_sqlite_path() -> Path:
     """测试替换旧 JSON 路径时使用同目录数据库，避免污染正式库。"""
+    if _SQLITE_PATH != _DEFAULT_SQLITE_PATH:
+        return _SQLITE_PATH
     if (
         _ACCOUNTS_JSON != _DEFAULT_ACCOUNTS_JSON
         or _OUTLOOK_JSON != _DEFAULT_OUTLOOK_JSON
@@ -853,6 +855,36 @@ def _get_conn() -> sqlite3.Connection:
 
 def _row_to_dict(row: dict | None) -> dict | None:
     return dict(row) if row is not None else None
+
+
+def get_storage_meta(key: str) -> str | None:
+    """读取 storage_meta 里的一条记录。"""
+    if not key:
+        return None
+    _ensure_sqlite()
+    with closing(_sqlite_conn()) as conn:
+        row = conn.execute("SELECT value FROM storage_meta WHERE key=?", (key,)).fetchone()
+    return None if row is None else str(row["value"])
+
+
+def set_storage_meta(key: str, value: str) -> None:
+    """写入 storage_meta。"""
+    if not key:
+        raise ValueError("storage_meta key 为空")
+    _ensure_sqlite()
+    with _LOCK, closing(_sqlite_conn()) as conn:
+        conn.execute("INSERT OR REPLACE INTO storage_meta(key, value) VALUES(?,?)", (key, str(value)))
+        conn.commit()
+
+
+def delete_storage_meta(key: str) -> None:
+    """删除 storage_meta 里的一条记录。"""
+    if not key:
+        return
+    _ensure_sqlite()
+    with _LOCK, closing(_sqlite_conn()) as conn:
+        conn.execute("DELETE FROM storage_meta WHERE key=?", (key,))
+        conn.commit()
 
 
 # ============================================================
@@ -2158,6 +2190,237 @@ def import_registered_email_accounts(records: list[dict], source: str | None) ->
         return inserted, skipped
 
 
+# ============================================================
+# 团队转移：子号导入 + 四步流程状态机
+# ============================================================
+
+_TEAM_TRANSFER_STALE_SECONDS = 600
+_TEAM_TRANSFER_QUEUE_STALE_SECONDS = 3600
+
+
+def import_team_children(records: list[dict]) -> tuple[int, int, int]:
+    """
+    把团队子号素材导入为账号 + 邮箱池（generic_api 源）。
+
+    records 元素：{email, mail_password}。code_url 由调用方按
+    {TEAM_MAIL_API_BASE}{TEAM_MAIL_FETCH_PATH}?email=..&password=..&limit=1 构造后
+    放在 raw["code_url"] 传入（保持 db 层不依赖 config.team_transfer）。
+
+    行为：
+      - 邮箱池：按邮箱 upsert（复用或新建，status=used，与账号关联）；
+      - 账号：已存在则补齐池关联与 import 标记（不覆盖已有 AT/TOTP），
+        不存在则新建（无 AT，等批量登录补齐）。
+
+    返回 (新建账号数, 更新账号数, 跳过数)。
+    """
+    with _LOCK:
+        accounts = _load_accounts()
+        generic_rows = _load_generic_api_emails()
+        inserted = updated = skipped = 0
+
+        for raw in records:
+            email = (raw.get("email") or "").strip()
+            mail_password = (raw.get("mail_password") or raw.get("password") or "").strip()
+            code_url = (raw.get("code_url") or "").strip()
+            if not email or not mail_password or not code_url:
+                skipped += 1
+                continue
+
+            now = _now()
+
+            pool_row = _find_by_email(generic_rows, email)
+            if pool_row is None:
+                pool_row = {
+                    "id": _next_id(generic_rows),
+                    "email": email,
+                    "code_url": code_url,
+                    "status": "used",
+                    "used_at": now,
+                    "note": "团队子号导入",
+                    "imported_at": now,
+                }
+                generic_rows.append(pool_row)
+            else:
+                pool_row["code_url"] = code_url
+            pool_row["status"] = "used"
+            pool_row["used_at"] = pool_row.get("used_at") or now
+            pool_row["note"] = pool_row.get("note") or "团队子号导入"
+            pool_row["copy_line"] = _generic_api_email_line(pool_row)
+
+            acc_row = _find_by_email(accounts, email)
+            if acc_row is None:
+                row_id = _next_id(accounts)
+                account = {
+                    "id": row_id,
+                    "email": email,
+                    "created_at": now,
+                    "access_token": "",
+                    "totp_secret": None,
+                    "user_name": None,
+                    "plan_type": None,
+                    "expires_at": None,
+                    "proxy_used": None,
+                    "email_source": "generic_api",
+                    "extra_json": json.dumps({
+                        "imported_team_child": True,
+                        "mail_password": mail_password,
+                    }, ensure_ascii=False),
+                    "codex_status": "",
+                    "codex_error": None,
+                    "updated_at": now,
+                    "original_email_line": _generic_api_email_line(pool_row),
+                }
+                account["copy_line"] = _account_line(account)
+                accounts.append(account)
+                pool_row["registered_account_id"] = row_id
+                inserted += 1
+            else:
+                # 已存在账号：补齐池关联，导入标记与收信密码只在缺省时写入
+                extra = {}
+                try:
+                    extra = json.loads(acc_row.get("extra_json") or "{}")
+                except Exception:
+                    extra = {}
+                if not isinstance(extra, dict):
+                    extra = {}
+                changed = False
+                if not extra.get("imported_team_child"):
+                    extra["imported_team_child"] = True
+                    changed = True
+                if not extra.get("mail_password"):
+                    extra["mail_password"] = mail_password
+                    changed = True
+                if changed:
+                    acc_row["extra_json"] = json.dumps(extra, ensure_ascii=False)
+                if not acc_row.get("email_source"):
+                    acc_row["email_source"] = "generic_api"
+                    changed = True
+                if changed:
+                    acc_row["copy_line"] = _account_line(acc_row)
+                    acc_row["updated_at"] = now
+                pool_row["registered_account_id"] = int(acc_row.get("id") or 0) or pool_row.get("registered_account_id")
+                updated += 1
+
+        _save_generic_api_emails(generic_rows)
+        _save_accounts(accounts)
+        return inserted, updated, skipped
+
+
+def claim_account_team_transfer(acc_id: int, trigger: str = "manual") -> bool:
+    """原子占用账号的团队转移任务；已有未超时任务时返回 False。"""
+    with _LOCK:
+        accounts = _load_accounts()
+        row = next((r for r in accounts if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        current_status = row.get("team_transfer_status")
+        if current_status in {"queued", "running"}:
+            try:
+                stamp_key = "team_transfer_queued_at" if current_status == "queued" else "team_transfer_started_at"
+                stale_after = _TEAM_TRANSFER_QUEUE_STALE_SECONDS if current_status == "queued" else _TEAM_TRANSFER_STALE_SECONDS
+                started_at = datetime.fromisoformat(str(row.get(stamp_key) or ""))
+                if (datetime.now() - started_at).total_seconds() < stale_after:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        now = _now()
+        row["team_transfer_status"] = "queued"
+        row["team_transfer_trigger"] = str(trigger or "manual")
+        row["team_transfer_step"] = None
+        row["team_transfer_queued_at"] = now
+        row["team_transfer_started_at"] = None
+        row["team_transfer_completed_at"] = None
+        row["team_transfer_error"] = None
+        row["updated_at"] = now
+        _save_accounts(accounts)
+        return True
+
+
+def mark_account_team_transfer_running(acc_id: int) -> bool:
+    """把已排队的团队转移任务标记为执行中。"""
+    with _LOCK:
+        accounts = _load_accounts()
+        row = next((r for r in accounts if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None or row.get("team_transfer_status") not in {"queued", "running"}:
+            return False
+        row["team_transfer_status"] = "running"
+        row["team_transfer_started_at"] = _now()
+        row["team_transfer_error"] = None
+        row["updated_at"] = _now()
+        _save_accounts(accounts)
+        return True
+
+
+def update_account_team_transfer_progress(acc_id: int, step: str) -> bool:
+    """转移过程中的步进更新（invited/accepted/transferred/kicked）。"""
+    with _LOCK:
+        accounts = _load_accounts()
+        row = next((r for r in accounts if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        row["team_transfer_status"] = "running"
+        row["team_transfer_step"] = str(step or "")
+        row["updated_at"] = _now()
+        _save_accounts(accounts)
+        return True
+
+
+def update_account_team_transfer(acc_id: int, result: dict | None = None) -> bool:
+    """写回账号团队转移结果。result: {ok, step, error, steps, checked_at}。"""
+    result = result or {}
+    with _LOCK:
+        accounts = _load_accounts()
+        row = next((r for r in accounts if int(r.get("id") or 0) == int(acc_id)), None)
+        if row is None:
+            return False
+        ok = bool(result.get("ok"))
+        row["team_transfer_status"] = "success" if ok else "failed"
+        row["team_transfer_ok"] = ok
+        row["team_transfer_step"] = result.get("step")
+        row["team_transfer_completed_at"] = _now()
+        row["team_transfer_error"] = None if ok else result.get("error")
+        if result.get("steps"):
+            row["team_transfer_steps"] = result.get("steps")
+        row["team_transfer_result_json"] = json.dumps(result, ensure_ascii=False)
+        row["updated_at"] = _now()
+        _save_accounts(accounts)
+        return True
+
+
+def recover_interrupted_team_transfers() -> int:
+    """服务启动时把上次进程遗留的转移队列状态恢复为可重试失败。"""
+    with _LOCK:
+        accounts = _load_accounts()
+        recovered = 0
+        now = _now()
+        for row in accounts:
+            if row.get("team_transfer_status") not in {"queued", "running"}:
+                continue
+            row["team_transfer_status"] = "failed"
+            row["team_transfer_ok"] = False
+            row["team_transfer_error"] = "WebUI 重启导致团队转移中断，请重新执行"
+            row["team_transfer_completed_at"] = now
+            row["updated_at"] = now
+            recovered += 1
+        if recovered:
+            _save_accounts(accounts)
+        return recovered
+
+
+def list_team_children() -> list[dict]:
+    """返回标记为团队子号（extra_json.imported_team_child）的账号列表。"""
+    out = []
+    for row in _load_accounts():
+        extra_raw = row.get("extra_json")
+        try:
+            extra = json.loads(extra_raw) if isinstance(extra_raw, str) and extra_raw.strip() else {}
+        except Exception:
+            extra = {}
+        if isinstance(extra, dict) and extra.get("imported_team_child"):
+            out.append(row)
+    return out
+
+
 def claim_next_outlook() -> dict | None:
     """原子领取一个可用 Outlook 账号并标记为 used。"""
     with _LOCK:
@@ -2548,6 +2811,142 @@ def read_codex_credential(filename: str) -> tuple[str, str]:
         content = json.loads(row["payload"])
         content = {k: v for k, v in content.items() if not k.startswith("_")}
         return json.dumps(content, ensure_ascii=False, indent=2), filename
+
+
+def _codex_refresh_token_from_payload(content: dict) -> str:
+    if not isinstance(content, dict):
+        return ""
+    return str(content.get("refresh_token") or content.get("refreshToken") or "").strip()
+
+
+def _codex_email_from_payload(content: dict, filename: str = "") -> str:
+    if isinstance(content, dict):
+        email = str(content.get("email") or "").strip()
+        if email:
+            return email
+    fname = str(filename or "")
+    if fname.startswith("codex-") and fname.endswith(".json"):
+        stem = fname[6:-5]
+        if "-" in stem and stem.rsplit("-", 1)[-1].lower() in ("free", "plus", "team", "pro", "enterprise"):
+            stem = stem.rsplit("-", 1)[0]
+        return stem.strip()
+    return ""
+
+
+def export_codex_refresh_tokens(
+    *,
+    filenames: list[str] | None = None,
+    emails: list[str] | None = None,
+    mark_exported: bool = True,
+) -> dict:
+    """
+    导出 Codex 授权 refresh_token。
+    每行：email----refresh_token（没有邮箱时只写 RT）。
+    返回 {text, count, exported, skipped}。
+    """
+    wanted_files: list[str] = []
+    file_seen: set[str] = set()
+    skipped: list[dict] = []
+
+    def _remember_filename(raw: str) -> None:
+        fname = str(raw or "").strip()
+        if not fname:
+            skipped.append({"filename": str(raw), "reason": "文件名为空"})
+            return
+        if not fname.startswith("codex-") or not fname.endswith(".json") or "/" in fname or "\\" in fname or ".." in fname:
+            skipped.append({"filename": fname, "reason": "非法文件名"})
+            return
+        if fname in file_seen:
+            return
+        file_seen.add(fname)
+        wanted_files.append(fname)
+
+    for raw in filenames or []:
+        if not isinstance(raw, str):
+            skipped.append({"filename": str(raw), "reason": "非字符串"})
+            continue
+        _remember_filename(raw)
+
+    email_keys: list[str] = []
+    email_seen: set[str] = set()
+    for raw in emails or []:
+        key = str(raw or "").strip().lower()
+        if not key:
+            skipped.append({"email": str(raw or ""), "reason": "邮箱为空"})
+            continue
+        if key in email_seen:
+            continue
+        email_seen.add(key)
+        email_keys.append(key)
+
+    rows_by_name: dict[str, dict] = {}
+    with _LOCK:
+        _ensure_sqlite()
+        with closing(_sqlite_conn()) as conn:
+            if wanted_files:
+                placeholders = ",".join("?" * len(wanted_files))
+                for row in conn.execute(
+                    f"SELECT filename, email, payload FROM codex_accounts WHERE filename IN ({placeholders})",
+                    wanted_files,
+                ):
+                    rows_by_name[str(row["filename"])] = dict(row)
+            if email_keys:
+                placeholders = ",".join("?" * len(email_keys))
+                for row in conn.execute(
+                    f"SELECT filename, email, payload FROM codex_accounts WHERE lower(email) IN ({placeholders}) "
+                    "ORDER BY created_at DESC, id DESC",
+                    email_keys,
+                ):
+                    fname = str(row["filename"] or "")
+                    if fname and fname not in rows_by_name:
+                        rows_by_name[fname] = dict(row)
+                        if fname not in file_seen:
+                            file_seen.add(fname)
+                            wanted_files.append(fname)
+
+        ordered: list[dict] = []
+        found_emails: set[str] = set()
+        for fname in wanted_files:
+            row = rows_by_name.get(fname)
+            if not row:
+                skipped.append({"filename": fname, "reason": "凭证不存在"})
+                continue
+            try:
+                content = json.loads(row.get("payload") or "{}")
+            except Exception:
+                skipped.append({"filename": fname, "reason": "凭证 JSON 无效"})
+                continue
+            if not isinstance(content, dict):
+                skipped.append({"filename": fname, "reason": "凭证格式无效"})
+                continue
+            refresh_token = _codex_refresh_token_from_payload(content)
+            email = _codex_email_from_payload(content, fname) or str(row.get("email") or "").strip()
+            if email:
+                found_emails.add(email.lower())
+            if not refresh_token:
+                skipped.append({"filename": fname, "email": email, "reason": "凭证没有 refresh_token"})
+                continue
+            ordered.append({"filename": fname, "email": email, "refresh_token": refresh_token})
+
+        for key in email_keys:
+            if key not in found_emails:
+                skipped.append({"email": key, "reason": "没有 Codex 凭证"})
+
+        if mark_exported:
+            for item in ordered:
+                mark_codex_exported(item["filename"])
+
+    lines = [
+        f"{item['email']}----{item['refresh_token']}" if item["email"] else item["refresh_token"]
+        for item in ordered
+    ]
+    text = ("\n".join(lines) + "\n") if lines else ""
+    return {
+        "text": text,
+        "count": len(ordered),
+        "exported": [{"filename": item["filename"], "email": item["email"]} for item in ordered],
+        "skipped": skipped,
+    }
 
 
 def mark_codex_exported(filename: str) -> dict:

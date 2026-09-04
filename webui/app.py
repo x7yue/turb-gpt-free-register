@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from flask import Flask, Response, jsonify, make_response, render_template, request
 import pyotp
 
-from core import codex_retry_service, db, plan_check_service, extract_link_service, codex_agent_service, live_check_service
+from core import codex_retry_service, db, plan_check_service, extract_link_service, codex_agent_service, live_check_service, team_transfer_service
 from webui.auth import init_auth, register_auth_routes
 from core import registration_service as svc
 from webui import config_editor
@@ -121,6 +121,11 @@ def _compact_account_for_list(row: dict) -> dict:
         if key in row:
             out[key] = row.get(key)
 
+    # 团队子号标记 + 转移状态（固定列展示）。
+    out["imported_team_child"] = bool(extra.get("imported_team_child"))
+    out["team_transfer_status"] = row.get("team_transfer_status") or ""
+    out["team_transfer_step"] = row.get("team_transfer_step") or ""
+
     if row.get("plan_check_status") in ("queued", "running") or row.get("plan_check_ok") is False:
         out["plan_check_ok"] = row.get("plan_check_ok")
 
@@ -142,6 +147,8 @@ def _compact_account_for_list(row: dict) -> dict:
         "codex_error", "codex_agent_message", "codex_agent_runtime_id",
         "codex_agent_sub2api_url", "codex_agent_sub2api_mode", "codex_agent_sub2api_total",
         "totp_setup_error", "totp_setup_message", "totp_setup_started_at", "totp_setup_completed_at",
+        # 团队转移。
+        "team_transfer_error", "team_transfer_completed_at", "team_transfer_queued_at",
     )
     for key in optional_keys:
         value = row.get(key)
@@ -222,13 +229,13 @@ def _job_status_counts(rows: list[dict]) -> dict:
 
 
 def _read_log_tail(path, *, max_bytes: int, default_running: bool = False, running_fn=None) -> dict:
-    if not path.exists():
-        return {"ok": True, "log": "", "running": bool(default_running)}
-    size = path.stat().st_size
-    with path.open("rb") as f:
-        if size > max_bytes:
-            f.seek(size - max_bytes)
-        content = f.read().decode("utf-8", errors="replace")
+    content = ""
+    if path.exists():
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            content = f.read().decode("utf-8", errors="replace")
     running = bool(default_running)
     if callable(running_fn):
         try:
@@ -323,6 +330,9 @@ def create_app(auth_code: str | None = None) -> Flask:
     recovered_totp_setups = db.recover_interrupted_totp_setups()
     if recovered_totp_setups:
         logger.warning("已恢复 %s 个因 WebUI 重启中断的 2FA 状态", recovered_totp_setups)
+    recovered_team_transfers = db.recover_interrupted_team_transfers()
+    if recovered_team_transfers:
+        logger.warning("已恢复 %s 个因 WebUI 重启中断的团队转移状态", recovered_team_transfers)
 
     # ----------------------------------------------------------
     # 页面
@@ -2031,6 +2041,83 @@ def create_app(auth_code: str | None = None) -> Flask:
             headers={"Content-Disposition": f'attachment; filename="{dl_name}"'},
         )
 
+    @app.post("/api/codex/export-rt")
+    def api_codex_export_rt():
+        """
+        导出 Codex 授权 refresh_token。
+        Body 任选其一（可同时给）：
+          {filenames:[...]}  按凭证文件名（Codex 页）
+          {account_ids:[...]} 按账号 ID（团队页子号）
+          {emails:[...]}
+        返回 JSON：{ok, count, filename, text, exported, skipped}。
+        每行文本：email----refresh_token。
+        """
+        from datetime import datetime as _dt
+
+        data = request.get_json(silent=True) or {}
+        filenames = data.get("filenames") or []
+        emails = list(data.get("emails") or [])
+        ids = data.get("account_ids") or data.get("ids") or []
+        skipped = []
+
+        if ids:
+            if not isinstance(ids, list):
+                return jsonify({"ok": False, "error": "account_ids 必须是数组"}), 400
+            if len(ids) > 1000:
+                return jsonify({"ok": False, "error": "单次最多 1000 个"}), 400
+            seen_emails = {str(x or "").strip().lower() for x in emails if str(x or "").strip()}
+            for raw in ids:
+                try:
+                    acc_id = int(raw)
+                except (TypeError, ValueError):
+                    skipped.append({"id": raw, "reason": "ID 非法"})
+                    continue
+                acc = db.get_account(acc_id)
+                if not acc:
+                    skipped.append({"id": acc_id, "reason": "账号不存在"})
+                    continue
+                email = str(acc.get("email") or "").strip()
+                if not email:
+                    skipped.append({"id": acc_id, "reason": "邮箱为空"})
+                    continue
+                key = email.lower()
+                if key in seen_emails:
+                    continue
+                seen_emails.add(key)
+                emails.append(email)
+
+        if filenames and not isinstance(filenames, list):
+            return jsonify({"ok": False, "error": "filenames 必须是数组"}), 400
+        if emails and not isinstance(emails, list) and not ids:
+            return jsonify({"ok": False, "error": "emails 必须是数组"}), 400
+        if isinstance(filenames, list) and len(filenames) > 1000:
+            return jsonify({"ok": False, "error": "单次最多 1000 个"}), 400
+        if not filenames and not emails:
+            return jsonify({"ok": False, "error": "请提供 filenames、account_ids 或 emails"}), 400
+
+        result = db.export_codex_refresh_tokens(
+            filenames=filenames if isinstance(filenames, list) else [],
+            emails=emails,
+            mark_exported=True,
+        )
+        result["skipped"] = skipped + list(result.get("skipped") or [])
+        if not result.get("count"):
+            return jsonify({
+                "ok": False,
+                "error": "没有可导出的 refresh_token",
+                "skipped": result["skipped"],
+            }), 409
+
+        dl_name = f"codex-rt-{_dt.now().strftime('%Y%m%d-%H%M%S')}.txt"
+        return jsonify({
+            "ok": True,
+            "count": result["count"],
+            "filename": dl_name,
+            "text": result["text"],
+            "exported": result["exported"],
+            "skipped": result["skipped"],
+        })
+
     @app.post("/api/codex/reset-export")
     def api_codex_reset_export():
         """清掉某个 codex 凭证的导出状态（重新标为未导出）。body {filename}。"""
@@ -2351,6 +2438,204 @@ def create_app(auth_code: str | None = None) -> Flask:
         except Exception:
             pass
         return jsonify(data)
+
+    # ----------------------------------------------------------
+    # 团队转移（母号 → 子号去除个人空间）
+    # ----------------------------------------------------------
+    def _team_child_for_ui(row: dict) -> dict:
+        item = _compact_account_for_list(row)
+        item["account_id"] = int(item.get("id") or 0)
+        item["status"] = item.get("team_transfer_status") or ""
+        item["step"] = item.get("team_transfer_step") or ""
+        item["error"] = item.get("team_transfer_error")
+        item["ok"] = row.get("team_transfer_ok")
+        item["completed_at"] = row.get("team_transfer_completed_at")
+        return item
+
+    @app.get("/api/team/status")
+    def api_team_status():
+        """母号登录态 + 转移队列设置 + 子号列表（含转移状态）。"""
+        children = [_team_child_for_ui(r) for r in db.list_team_children()]
+        return jsonify({
+            "ok": True,
+            "admin": team_transfer_service.admin_status(),
+            "queue": team_transfer_service.queue_settings(),
+            "children": children,
+        })
+
+    @app.post("/api/team/import-children")
+    def api_team_import_children():
+        """导入团队子号素材（每行：邮箱----收信密码）。"""
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text") or "")
+        if not text.strip():
+            return jsonify({"ok": False, "error": "导入内容为空"}), 400
+
+        from config import team_transfer as team_cfg
+        base = str(getattr(team_cfg, "TEAM_MAIL_API_BASE", "") or "").rstrip("/")
+        path = str(getattr(team_cfg, "TEAM_MAIL_FETCH_PATH", "/emails") or "/emails")
+        limit = int(getattr(team_cfg, "TEAM_MAIL_FETCH_LIMIT", 1) or 1)
+        if not base:
+            return jsonify({"ok": False, "error": "TEAM_MAIL_API_BASE 未配置"}), 400
+
+        from urllib.parse import quote
+        records = []
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = [p.strip() for p in line.replace("====", "----").split("----")]
+            if len(parts) < 2 or not parts[0] or not parts[1]:
+                records.append({"email": parts[0] if parts else "", "mail_password": "", "code_url": ""})
+                continue
+            email, mail_password = parts[0], parts[1]
+            code_url = f"{base}{path}?email={quote(email)}&password={quote(mail_password)}&limit={limit}"
+            records.append({"email": email, "mail_password": mail_password, "code_url": code_url})
+
+        # 无密码/无 URL 的行直接计为解析失败
+        valid = [r for r in records if r.get("email") and r.get("mail_password")]
+        parsed = len(valid)
+        invalid = len(records) - parsed
+        if not valid:
+            return jsonify({"ok": False, "error": "没有解析到有效的行（格式：邮箱----收信密码）", "parsed": 0}), 400
+
+        try:
+            inserted, updated, skipped = db.import_team_children(valid)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"导入失败: {type(exc).__name__}: {exc}"}), 500
+        return jsonify({
+            "ok": True,
+            "parsed": parsed,
+            "invalid": invalid,
+            "inserted": inserted,
+            "updated": updated,
+            "skipped": skipped,
+        })
+
+    @app.post("/api/team/admin-login")
+    def api_team_admin_login():
+        """母号密码登录（后台线程）。Body {email, password, totp_secret?}"""
+        data = request.get_json(silent=True) or {}
+        email = str(data.get("email") or "").strip()
+        password = str(data.get("password") or "")
+        totp_secret = str(data.get("totp_secret") or "").strip()
+        if not email or not password:
+            return jsonify({"ok": False, "error": "母号邮箱和密码不能为空"}), 400
+        result = team_transfer_service.start_admin_login(email, password, totp_secret)
+        status_code = 202 if result.get("accepted") else 409
+        return jsonify({"ok": bool(result.get("accepted")), **result}), status_code
+
+    @app.post("/api/team/admin-otp")
+    def api_team_admin_otp():
+        """母号登录等待 OTP 时提交邮箱验证码。Body {code}"""
+        data = request.get_json(silent=True) or {}
+        code = str(data.get("code") or data.get("otp") or "").strip()
+        admin_email = str(team_transfer_service.admin_status().get("email") or "")
+        if not admin_email:
+            return jsonify({"ok": False, "error": "母号当前不在登录流程中"}), 400
+        try:
+            result = team_transfer_service.submit_admin_otp(admin_email, code)
+            return jsonify(result)
+        except Exception as exc:
+            return jsonify({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), 400
+
+    @app.post("/api/team/admin-reset")
+    def api_team_admin_reset():
+        """重置母号登录态。"""
+        return jsonify(team_transfer_service.reset_admin())
+
+    @app.post("/api/team/transfer-bulk")
+    def api_team_transfer_bulk():
+        """对勾选的子号批量执行团队转移。Body {account_ids:[...]}"""
+        data = request.get_json(silent=True) or {}
+        ids = data.get("account_ids") or data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"ok": False, "error": "account_ids 必须是非空数组"}), 400
+        if len(ids) > 500:
+            return jsonify({"ok": False, "error": "单次最多转移 500 个账号"}), 400
+
+        admin = team_transfer_service.admin_status()
+        if admin.get("state") != "logged_in" or not admin.get("team_account_id"):
+            return jsonify({"ok": False, "error": "母号未登录或未就绪，请先完成母号登录"}), 409
+
+        started = []
+        busy_count = 0
+        failed = []
+        skipped = []
+        seen = set()
+        for raw in ids:
+            try:
+                acc_id = int(raw)
+            except (TypeError, ValueError):
+                skipped.append({"id": raw, "reason": "ID 非法"})
+                continue
+            if acc_id in seen:
+                continue
+            seen.add(acc_id)
+            acc = db.get_account(acc_id)
+            if not acc:
+                skipped.append({"id": acc_id, "reason": "账号不存在"})
+                continue
+            email = str(acc.get("email") or "").strip()
+            if not email:
+                skipped.append({"id": acc_id, "reason": "邮箱为空"})
+                continue
+            if not str(acc.get("access_token") or "").strip():
+                skipped.append({"id": acc_id, "email": email, "reason": "缺少 accessToken，请先批量登录"})
+                continue
+            queued = team_transfer_service.enqueue_account_team_transfer(
+                account_id=acc_id,
+                email=email,
+                trigger="manual",
+            )
+            if queued.get("accepted"):
+                started.append({"id": acc_id, "email": email, "status": "queued"})
+            elif queued.get("busy"):
+                busy_count += 1
+                skipped.append({"id": acc_id, "email": email, "reason": queued.get("error") or "已有转移任务"})
+            else:
+                failed.append({"id": acc_id, "email": email, "error": queued.get("error") or "入队失败"})
+
+        return jsonify({
+            "ok": True,
+            "message": f"已入队 {len(started)} 个转移任务",
+            "started": started,
+            "started_count": len(started),
+            "busy_count": busy_count,
+            "failed": failed,
+            "failed_count": len(failed),
+            "skipped": skipped,
+            "skipped_count": len(skipped),
+            "queue": team_transfer_service.queue_settings(),
+        }), 202
+
+    @app.get("/api/team/transfer-log")
+    def api_team_transfer_log():
+        """读取母号登录/转移日志。?email=母号邮箱"""
+        admin = team_transfer_service.admin_status()
+        email = (request.args.get("email") or "").strip() or str(admin.get("email") or "")
+        if not email:
+            return jsonify({"ok": False, "error": "email 为空"}), 400
+        p = team_transfer_service.log_path(email)
+        admin_busy = str(admin.get("state") or "") in {"logging_in", "waiting_otp"}
+        data = _read_log_tail(
+            p,
+            max_bytes=80_000,
+            running_fn=lambda: admin_busy or db_sql_running_team(email) == "1",
+        )
+        data["admin_state"] = admin.get("state")
+        return jsonify(data)
+
+    def db_sql_running_team(email: str) -> str:
+        """判断该母号名下是否仍有排队/运行中的转移任务（供日志轮询 running）。"""
+        try:
+            for item in team_transfer_service.transfer_status_snapshot():
+                if str(item.get("status") or "") in {"queued", "running"}:
+                    return "1"
+        except Exception:
+            pass
+        return "0"
+
 
     # ----------------------------------------------------------
     # 注册任务

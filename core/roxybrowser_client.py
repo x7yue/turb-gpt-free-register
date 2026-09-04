@@ -250,14 +250,38 @@ class RoxyBrowserClient:
                 last_exc = exc
                 retryable = self._is_retryable_error(exc)
                 if attempt >= max_attempts or not retryable:
-                    raise
+                    wrapped = self._wrap_request_error(exc)
+                    if wrapped is exc:
+                        raise
+                    raise wrapped from exc
                 delay = base_delay * attempt
                 logger.warning(
                     "[Roxy] API 请求失败，将在 %.1fs 后重试：%s %s attempt=%s/%s error=%s",
                     delay, method_u, path, attempt, max_attempts, exc,
                 )
                 time.sleep(delay)
-        raise last_exc or RuntimeError(f"Roxy API 请求失败 {method_u} {path}")
+        wrapped = self._wrap_request_error(last_exc or RuntimeError(f"Roxy API 请求失败 {method_u} {path}"))
+        if wrapped is last_exc:
+            raise wrapped
+        raise wrapped from last_exc
+
+    def _wrap_request_error(self, exc: Exception) -> Exception:
+        """把 Roxy 本地 API 连不上转成可读错误，避免堆栈里只剩 WinError 10061。"""
+        text = str(exc or "")
+        low = text.lower()
+        refused = (
+            isinstance(exc, (requests.exceptions.ConnectionError, ConnectionRefusedError))
+            or "10061" in text
+            or "connection refused" in low
+            or "积极拒绝" in text
+            or "failed to establish a new connection" in low
+        )
+        if refused:
+            return RuntimeError(
+                f"无法连接 RoxyBrowser 本地 API（{self.api_base}）。"
+                "请先启动 RoxyBrowser，或把 Codex 授权驱动改为 protocol。"
+            )
+        return exc
 
     def try_request(self, method: str, path: str, *, params: dict | None = None, json_body: dict | None = None) -> tuple[bool, dict | str]:
         """宽松请求：用于探测不同 Roxy 版本接口，失败不抛出。"""

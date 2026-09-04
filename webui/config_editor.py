@@ -56,6 +56,56 @@ EDITABLE_FIELDS = [
         "label": "注册后自动查套餐", "help": "注册成功后自动入队查询套餐/Plus 资格；关闭后仅保存账号，不自动查套餐",
     },
 
+    # ---- 团队转移 ----
+    {
+        "key": "TEAM_MAIL_API_BASE", "file": "team_transfer.py", "type": "str", "group": "团队转移",
+        "label": "子号收信 API 基址", "help": "子号邮箱验证码收取 API，例如 https://mail.siderchn.com",
+    },
+    {
+        "key": "TEAM_MAIL_FETCH_PATH", "file": "team_transfer.py", "type": "str", "group": "团队转移",
+        "label": "收信 API 路径", "help": "默认 /emails；完整取码 URL 为 {基址}{路径}?email=..&password=..&limit=1",
+    },
+    {
+        "key": "TEAM_MAIL_FETCH_LIMIT", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "收信拉取条数", "help": "单次拉取邮件条数，默认 1",
+    },
+    {
+        "key": "TRANSFER_ROLE", "file": "team_transfer.py", "type": "str", "group": "团队转移",
+        "label": "邀请角色", "help": "母号邀请子号时的角色，默认 standard-user",
+    },
+    {
+        "key": "TRANSFER_SEAT_TYPE", "file": "team_transfer.py", "type": "str", "group": "团队转移",
+        "label": "邀请 Seat 类型", "help": "默认 default",
+    },
+    {
+        "key": "TRANSFER_ACCEPTED_TOS_VERSION", "file": "team_transfer.py", "type": "str", "group": "团队转移",
+        "label": "TOS 版本", "help": "子号接受邀请时提交的 accepted_tos_version",
+    },
+    {
+        "key": "TEAM_DELAY_AFTER_INVITE", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "邀请后延时(秒)", "help": "母号邀请成功后等待秒数",
+    },
+    {
+        "key": "TEAM_DELAY_AFTER_ACCEPT", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "接受后延时(秒)", "help": "子号接受邀请成功后等待秒数",
+    },
+    {
+        "key": "TEAM_DELAY_AFTER_TRANSFER", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "转移后延时(秒)", "help": "去除个人空间成功后等待秒数",
+    },
+    {
+        "key": "TEAM_TRANSFER_WORKERS", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "转移并发数", "help": "子号转移并发线程数，建议 1~3",
+    },
+    {
+        "key": "TEAM_TRANSFER_MAX_ATTEMPTS", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "每步重试次数", "help": "四步流程单步对临时性网络错误的最大尝试次数",
+    },
+    {
+        "key": "TEAM_ADMIN_OTP_TIMEOUT", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "母号OTP等待(秒)", "help": "母号登录等待人工输入邮箱验证码的超时时间",
+    },
+
     # ---- CloakBrowser ----
     {
         "key": "CLOAK_HEADLESS", "file": "cloakbrowser.py", "type": "bool", "group": "CloakBrowser",
