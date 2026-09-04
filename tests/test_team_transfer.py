@@ -3,6 +3,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -50,6 +51,35 @@ class TeamTransferConfigTests(unittest.TestCase):
         self.assertEqual(err.http_status, 401)
         self.assertTrue(err.needs_relogin)
         self.assertFalse(err.retryable)
+
+    def test_wait_otp_with_progress_logs_start_and_done(self):
+        logs = []
+        with patch("core.email_provider.wait_for_otp", return_value="123456"):
+            code = tt.wait_otp_with_progress(
+                "kid@x.com", after_ts=1.0, email_source="generic_api",
+                log=logs.append, heartbeat_seconds=30,
+            )
+        self.assertEqual(code, "123456")
+        self.assertTrue(any("开始等待邮箱 OTP" in x for x in logs))
+        self.assertTrue(any("来源=generic_api" in x for x in logs))
+        self.assertTrue(any("已取到 OTP" in x for x in logs))
+        self.assertFalse(any("123456" in x for x in logs))
+
+    def test_wait_otp_with_progress_heartbeat_while_blocking(self):
+        logs = []
+
+        def slow(*_a, **_k):
+            time.sleep(0.8)
+            return "999999"
+
+        with patch("core.email_provider.wait_for_otp", side_effect=slow):
+            code = tt.wait_otp_with_progress(
+                "kid@x.com", after_ts=1.0, email_source="generic_api",
+                log=logs.append, heartbeat_seconds=0.15,
+            )
+        self.assertEqual(code, "999999")
+        self.assertTrue(any("仍在等 OTP" in x for x in logs))
+        self.assertTrue(any("已取到 OTP" in x for x in logs))
 
 
 class TeamChildrenImportTests(unittest.TestCase):
@@ -284,7 +314,7 @@ class TransferChildFlowTests(unittest.TestCase):
         self.assertEqual(ops[2]["path"], "/accounts/transfer")
         self.assertEqual(ops[2]["json_body"], {"workspace_id": "team-123"})
         self.assertEqual(ops[3]["path"], "/accounts/team-123/users/user-9")
-        self.assertEqual([c["token_kind"] for c in ops], ["admin", "child", "child", "admin"])
+        self.assertEqual([c["token_kind"] for c in ops], ["admin", "child", "admin", "admin"])
         self.assertEqual(set(result["steps"]), {"invited", "accepted", "transferred", "kicked"})
 
     def test_failure_stops_and_reports_step(self):
@@ -326,7 +356,7 @@ class TransferChildFlowTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertTrue(result.get("needs_relogin"))
 
-    def test_already_member_skips_invite_accept_but_still_tries_transfer(self):
+    def test_already_member_still_invites_and_accepts(self):
         def already_member(*, label, token, method, path, proxy, json_body=None, account_id=None):
             self.captured.append({"label": label, "method": method, "path": path, "json_body": json_body})
             if label == "list_members":
@@ -334,6 +364,7 @@ class TransferChildFlowTests(unittest.TestCase):
                     "items": [{"id": "user-9", "email": "kid@x.com", "role": "standard-user"}],
                 }, "error": None}
             if label == "transfer_account":
+                self.assertEqual(token, "ADMIN_AT")
                 return {"ok": True, "http_status": 200, "data": {"success": True}, "error": None}
             if label == "kick_user":
                 return {"ok": True, "http_status": 200, "data": {}, "error": None}
@@ -349,10 +380,9 @@ class TransferChildFlowTests(unittest.TestCase):
             )
         self.assertTrue(result["ok"])
         labels = [c["label"] for c in self.captured]
-        self.assertEqual(labels, ["list_members", "transfer_account", "kick_user"])
-        self.assertTrue(any("跳过步骤 invited" in x for x in logs))
-        self.assertTrue(any("跳过步骤 accepted" in x for x in logs))
-        self.assertFalse(any("跳过步骤 transferred" in x for x in logs))
+        self.assertEqual(labels, ["list_members", "invite", "accept_invite", "transfer_account", "kick_user"])
+        self.assertFalse(any("跳过步骤 accepted" in x for x in logs))
+        self.assertTrue(any("已在团队=是" in x for x in logs))
 
     def test_already_member_skips_transfer_only_when_workspace_gone(self):
         def side(*, label, **kw):
@@ -400,6 +430,110 @@ class TransferChildFlowTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["step"], "transferred")
         self.assertIn("422", result["error"])
+
+    def test_accept_workspace_gone_refreshes_token_then_retries(self):
+        def side(*, label, token=None, **kw):
+            self.captured.append((label, token))
+            if label == "list_members":
+                return {"ok": True, "http_status": 200, "data": {"items": []}, "error": None}
+            if label == "accept_invite" and token == "STALE_AT":
+                raise tt._http_auth_error(
+                    "accept_invite",
+                    403,
+                    '{ "error": { "message": "{\\"detail\\":{\\"code\\":\\"invalid_workspace_selected\\"}}", '
+                    '"code": "invalid_workspace_selected" }, "status": 403 }',
+                )
+            return {"ok": True, "http_status": 200, "data": {}, "error": None}
+
+        refreshed = []
+
+        def refresh():
+            refreshed.append(1)
+            return {"access_token": "FRESH_AT", "account_id": "team-ws"}
+
+        logs = []
+        with patch.object(tt, "_api_step", side_effect=side), \
+             patch.object(tt.time, "sleep"):
+            result = tt.transfer_child(
+                admin_email="a", admin_token="A", team_account_id="t",
+                child_email="kid@x.com", child_token="STALE_AT", child_user_id="u",
+                log=logs.append,
+                refresh_child_token=refresh,
+            )
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertFalse(result.get("needs_relogin"))
+        self.assertEqual(result["step"], "kicked")
+        self.assertEqual(refreshed, [1])
+        self.assertTrue(any("重试接受邀请" in x for x in logs))
+        self.assertEqual(
+            [label for label, _token in self.captured],
+            ["list_members", "invite", "accept_invite", "accept_invite", "transfer_account", "kick_user"],
+        )
+        accept_tokens = [token for label, token in self.captured if label == "accept_invite"]
+        self.assertEqual(accept_tokens, ["STALE_AT", "FRESH_AT"])
+
+    def test_accept_workspace_gone_without_refresh_fails(self):
+        def side(*, label, **kw):
+            if label == "list_members":
+                return {"ok": True, "http_status": 200, "data": {"items": []}, "error": None}
+            if label == "accept_invite":
+                raise tt._http_auth_error(
+                    "accept_invite", 403, '{"detail":{"code":"invalid_workspace_selected"}}',
+                )
+            return {"ok": True, "http_status": 200, "data": {}, "error": None}
+
+        with patch.object(tt, "_api_step", side_effect=side), \
+             patch.object(tt.time, "sleep"):
+            result = tt.transfer_child(
+                admin_email="a", admin_token="A", team_account_id="t",
+                child_email="kid@x.com", child_token="C", child_user_id="u",
+                log=lambda *_: None,
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["step"], "accepted")
+        self.assertTrue(result.get("needs_relogin"))
+        self.assertIn("重新登录", result["error"])
+
+    def test_accept_real_auth_failure_is_not_skipped(self):
+        def side(*, label, **kw):
+            if label == "list_members":
+                return {"ok": True, "http_status": 200, "data": {"items": []}, "error": None}
+            if label == "accept_invite":
+                raise tt._http_auth_error("accept_invite", 401, '{"error":{"message":"unauthorized"}}')
+            return {"ok": True, "http_status": 200, "data": {}, "error": None}
+
+        with patch.object(tt, "_api_step", side_effect=side), \
+             patch.object(tt.time, "sleep"):
+            result = tt.transfer_child(
+                admin_email="a", admin_token="A", team_account_id="t",
+                child_email="kid@x.com", child_token="C", child_user_id="u",
+                log=lambda *_: None,
+            )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["step"], "accepted")
+        self.assertTrue(result.get("needs_relogin"))
+        self.assertIn("登录态失效", result["error"])
+
+    def test_http_auth_error_workspace_gone_is_not_relogin(self):
+        err = tt._http_auth_error("accept_invite", 403, '{"detail":{"code":"invalid_workspace_selected"}}')
+        self.assertFalse(err.needs_relogin)
+        self.assertNotIn("登录态失效", str(err))
+        real = tt._http_auth_error("accept_invite", 403, '{"error":{"message":"forbidden"}}')
+        self.assertTrue(real.needs_relogin)
+        self.assertIn("登录态失效", str(real))
+
+    def test_find_member_matches_nested_email_and_account_user_id(self):
+        members = [{
+            "id": "user-9",
+            "account_user_id": "user-9__team-1",
+            "verified_email": "Kid@x.com",
+            "role": "standard-user",
+        }]
+        found = tt._find_team_member(members, email="kid@x.com", user_id="missing")
+        self.assertEqual(found["id"], "user-9")
+        found_uid = tt._find_team_member(members, email="other@x.com", user_id="user-9")
+        self.assertEqual(found_uid["id"], "user-9")
+        self.assertEqual(tt._extract_member_items({"data": {"items": members}}), members)
 
 
 class TeamChildOtpTests(unittest.TestCase):

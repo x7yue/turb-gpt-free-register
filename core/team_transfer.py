@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-团队转移核心流程：母号登录 + 子号四步（邀请→接受→去除个人空间→踢出）。
+团队转移核心流程：母号登录 + 四步（邀请→接受→母号合并个人空间数据→踢出）。
 
 母号登录：
     复用 account_liveness 的协议登录链路（CSRF → Signin → Authorize →
@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -182,9 +183,10 @@ def login_admin(
     otp_waiter=None,
     proxy: str | None = None,
     log=print,
+    role_label: str = "母号",
 ) -> dict:
     """
-    母号密码登录，返回 {ok, email, access_token, user_id, account_id, team_account_id, expires, error}。
+    母号/子号密码登录，返回 {ok, email, access_token, user_id, account_id, team_account_id, expires, error}。
 
     team_account_id 取 session 返回的 accounts 里 planType=team 的条目；找不到时
     回退 AT 的 chatgpt_account_id claim（由调用方决定是否继续）。
@@ -225,7 +227,7 @@ def login_admin(
 
     session: BrowserSession | None = None
     try:
-        log(f"开始母号登录：{email}")
+        log(f"开始{role_label}登录：{email}")
         # 备用登录链：CSRF → Signin（providers 容易被 CF 拦，不作硬门槛）
         session, authorize_url = _network_preflight_with_retry(email, proxy)
         log("authorize URL 已获取，跟随登录重定向")
@@ -239,9 +241,9 @@ def login_admin(
         password_result: dict = {}
 
         if "email-verification" in (final_url or ""):
-            log("authorize 后进入邮箱验证，等待人工输入 OTP（WebUI 团队转移页提交）")
+            log("authorize 后进入邮箱验证页，开始等待 OTP")
             current_otp = otp_waiter(email)
-            log("OTP 已获取，提交验证")
+            log("OTP 已提交验证，继续完成登录")
             from core.openai_auth import EmailOtpInvalidError, validate_email_otp
             try:
                 validate_result = validate_email_otp(session, current_otp, sentinel_header=None, so_header=None)
@@ -284,9 +286,9 @@ def login_admin(
 
         elif session_info is None and ("email-verification" in continue_url or page_type in {"email_verification", "email_otp_send"}):
             # 密码登录后仍要求邮箱验证：人工在 WebUI 提交验证码
-            log("密码登录后进入邮箱验证，等待人工输入 OTP（WebUI 团队转移页提交）")
+            log("密码登录后进入邮箱验证页，开始等待 OTP")
             current_otp = otp_waiter(email)
-            log("OTP 已获取，提交验证")
+            log("OTP 已提交验证，继续完成登录")
             from core.openai_auth import EmailOtpInvalidError, validate_email_otp
             try:
                 validate_result = validate_email_otp(session, current_otp, sentinel_header=None, so_header=None)
@@ -332,17 +334,20 @@ def login_admin(
             result["team_account_id"] = claims.get("account_id")
             result["team_plan_type"] = claims.get("claim_plan_type")
             log(f"session 未直接给出 team workspace，回退 AT claim: {result['team_account_id']}")
-        log(f"母号登录成功：{email} team_account_id={result.get('team_account_id')}")
+        log(
+            f"{role_label}登录成功：{email} plan={claims.get('claim_plan_type') or '-'} "
+            f"account_id={result.get('account_id')} team_account_id={result.get('team_account_id')}"
+        )
         return result
     except TeamTransferError as exc:
         result["ok"] = False
         result["error"] = str(exc)
-        logger.exception("母号登录失败: %s", email)
+        logger.exception("%s登录失败: %s", role_label, email)
         return result
     except Exception as exc:
         result["ok"] = False
         result["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
-        logger.exception("母号登录失败: %s", email)
+        logger.exception("%s登录失败: %s", role_label, email)
         return result
     finally:
         if session is not None:
@@ -431,12 +436,7 @@ def _api_step(
                 label, method.upper(), path, status, account_id or "-", body or "(empty)",
             )
             if status in (401, 403):
-                raise TeamTransferError(
-                    f"{label}: 登录态失效 HTTP {status}: {body or '(empty body)'}",
-                    http_status=status,
-                    retryable=False,
-                    needs_relogin=True,
-                )
+                raise _http_auth_error(label, status, body)
             last_error = {
                 "ok": False,
                 "http_status": status,
@@ -481,6 +481,39 @@ def _error_has_code(exc: Exception | dict | None, *codes: str) -> bool:
     return any(str(code or "").lower() in blob for code in codes if code)
 
 
+def _workspace_gone(blob: Exception | dict | str | None) -> bool:
+    """原个人空间已合并/失效：invalid_workspace_selected 或 token_expired。"""
+    text = blob if isinstance(blob, str) else _error_text(blob)
+    return _error_has_code({"error": text}, "invalid_workspace_selected", "token_expired")
+
+
+def _http_auth_error(label: str, status: int, body: str) -> TeamTransferError:
+    """401/403：工作区失效不算登录态丢失，交给上层按步骤决定是否跳过。"""
+    gone = _workspace_gone(body)
+    prefix = f"{label}: HTTP {status}" if gone else f"{label}: 登录态失效 HTTP {status}"
+    return TeamTransferError(
+        f"{prefix}: {body or '(empty body)'}",
+        http_status=status,
+        retryable=False,
+        needs_relogin=not gone,
+    )
+
+
+def _extract_member_items(data) -> list[dict]:
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    if not isinstance(data, dict):
+        return []
+    for key in ("items", "users", "members", "account_users"):
+        val = data.get(key)
+        if isinstance(val, list):
+            return [x for x in val if isinstance(x, dict)]
+    inner = data.get("data")
+    if inner is not None and inner is not data:
+        return _extract_member_items(inner)
+    return []
+
+
 def _list_team_members(admin_token: str, team_account_id: str, proxy: str | None) -> list[dict]:
     """母号拉团队成员；失败时返回空列表，不中断主流程。"""
     try:
@@ -496,20 +529,92 @@ def _list_team_members(admin_token: str, team_account_id: str, proxy: str | None
         return []
     if not res.get("ok"):
         return []
-    data = res.get("data") if isinstance(res.get("data"), dict) else {}
-    items = data.get("items") or []
-    return [x for x in items if isinstance(x, dict)]
+    return _extract_member_items(res.get("data"))
+
+
+def _member_emails(item: dict) -> set[str]:
+    values = [
+        item.get("email"),
+        item.get("verified_email"),
+        item.get("email_address"),
+    ]
+    user = item.get("user") if isinstance(item.get("user"), dict) else {}
+    values.extend([user.get("email"), user.get("verified_email"), user.get("email_address")])
+    return {str(v).strip().lower() for v in values if str(v or "").strip()}
 
 
 def _find_team_member(members: list[dict], *, email: str, user_id: str) -> dict | None:
     email_l = str(email or "").strip().lower()
     uid = str(user_id or "").strip()
     for item in members:
-        if uid and str(item.get("id") or "").strip() == uid:
+        item_uid = str(item.get("id") or "").strip()
+        account_uid = str(item.get("account_user_id") or "").strip().split("__")[0]
+        if uid and uid in (item_uid, account_uid):
             return item
-        if email_l and str(item.get("email") or "").strip().lower() == email_l:
+        if email_l and email_l in _member_emails(item):
             return item
     return None
+
+
+def _mail_request_timeout() -> int:
+    return max(5, min(120, int(getattr(cfg, "TEAM_MAIL_REQUEST_TIMEOUT", 40) or 40)))
+
+
+def _token_account_id(token: str) -> str | None:
+    try:
+        aid = str(token_claims(token).get("account_id") or "").strip()
+    except Exception:
+        return None
+    return aid or None
+
+
+def wait_otp_with_progress(
+    email: str,
+    *,
+    after_ts: float,
+    email_source: str | None = None,
+    log=print,
+    heartbeat_seconds: float = 10,
+    max_wait: int | None = None,
+) -> str:
+    """等待 OTP，期间按心跳把进度写进调用方日志，避免看起来像卡住。"""
+    from config import email as email_cfg
+    from core.email_provider import wait_for_otp
+
+    wait_limit = int(max_wait if max_wait is not None else (getattr(email_cfg, "OTP_MAX_WAIT", 90) or 90))
+    poll = int(getattr(email_cfg, "OTP_POLL_INTERVAL", 3) or 3)
+    source = str(email_source or "").strip() or "自动"
+    beat = float(heartbeat_seconds if heartbeat_seconds is not None else 10)
+    if beat <= 0:
+        beat = 10.0
+    beat = max(0.05, beat)
+    log(
+        f"开始等待邮箱 OTP：来源={source}，最长 {wait_limit}s，"
+        f"约每 {poll}s 拉一次收件箱（单次请求最多约 {_mail_request_timeout()}s，超时也会打日志）"
+    )
+    started = time.time()
+    stop = threading.Event()
+
+    def _heartbeat() -> None:
+        while not stop.wait(beat):
+            elapsed = int(time.time() - started)
+            left = max(0, wait_limit - elapsed)
+            log(f"仍在等 OTP：已等 {elapsed}s，还剩约 {left}s，收件箱轮询中…")
+
+    worker = threading.Thread(target=_heartbeat, name=f"otp-heartbeat:{email}", daemon=True)
+    worker.start()
+    try:
+        code = wait_for_otp(email, after_ts=after_ts, email_source=email_source, max_wait=wait_limit)
+        elapsed = int(time.time() - started)
+        digits = len(str(code or "").strip())
+        log(f"已取到 OTP（等待 {elapsed}s，{digits} 位），正在提交验证")
+        return code
+    except Exception as exc:
+        elapsed = int(time.time() - started)
+        log(f"等待 OTP 失败（已等 {elapsed}s）：{type(exc).__name__}: {str(exc)[:220]}")
+        raise
+    finally:
+        stop.set()
 
 
 # ============================================================
@@ -526,11 +631,14 @@ def transfer_child(
     child_user_id: str,
     proxy: str | None = None,
     log=print,
+    refresh_child_token=None,
 ) -> dict:
     """
-    对单个子号执行四步：邀请 → 接受 → 去除个人空间 → 踢出。
+    对单个子号执行四步：邀请 → 接受 → 母号合并个人空间数据 → 踢出。
 
     child_user_id 是子号加入团队后的 user id（PATCH/DELETE 用）。
+    refresh_child_token: 可选 fn() -> {access_token, account_id?}。接受邀请若因
+    子号 AT 绑着已失效个人空间而 403，会重新登录子号后再真正 POST accept。
 
     返回 {ok, email, steps: {step: {...}}, step, error, checked_at}。
     ok=True 表示四步全部成功（最后一步为 kicked）。
@@ -554,10 +662,10 @@ def transfer_child(
         }
 
     def _run_step(step: str, **kw) -> dict:
+        result["step"] = step
         res = _api_step(**kw)
         _record(step, res)
         if not res.get("ok"):
-            result["step"] = step
             result["error"] = res.get("error") or f"{step} 失败"
             raise TeamTransferError(result["error"], http_status=res.get("http_status"))
         return res
@@ -569,64 +677,103 @@ def transfer_child(
     try:
         members = _list_team_members(admin_token, team_account_id, proxy)
         already_member = _find_team_member(members, email=child_email, user_id=child_user_id)
-        if already_member:
-            log(f"[{child_email}] 已是团队成员 role={already_member.get('role') or '-'}，邀请/接受按已完成处理")
+        log(
+            f"[{child_email}] 成员列表 {len(members)} 人，"
+            f"已在团队={'是 role=' + str(already_member.get('role') or '-') if already_member else '否'}"
+        )
 
-        # 步骤1：母号邀请子号（已在团队里则不必再邀）
-        if already_member:
-            _mark_skipped("invited", "已是团队成员")
-        else:
-            log(f"[{child_email}] 步骤1/4 邀请加入团队 {team_account_id}")
-            try:
-                invite_res = _run_step(
-                    "invited",
-                    label="invite",
-                    token=admin_token,
-                    method="POST",
-                    path=f"/accounts/{team_account_id}/invites",
-                    proxy=proxy,
-                    account_id=team_account_id,
-                    json_body={
-                        "email_addresses": [child_email],
-                        "role": settings["role"],
-                        "seat_type": settings["seat_type"],
-                    },
-                )
-                invite_data = invite_res.get("data")
-                if invite_data is not None:
-                    log(f"[{child_email}] 邀请响应: {_clip_http_body(json.dumps(invite_data, ensure_ascii=False), 500)}")
-            except TeamTransferError as exc:
-                if exc.http_status == 409 or _error_has_code(exc, "already"):
-                    _mark_skipped("invited", f"邀请接口返回已存在：{exc}")
-                else:
-                    raise
-            time.sleep(settings["delay_invite"])
+        # 步骤1：母号邀请子号。已在团队里也照发，409/already 才视为邀请已存在。
+        log(f"[{child_email}] 步骤1/4 邀请加入团队 {team_account_id}")
+        try:
+            invite_res = _run_step(
+                "invited",
+                label="invite",
+                token=admin_token,
+                method="POST",
+                path=f"/accounts/{team_account_id}/invites",
+                proxy=proxy,
+                account_id=team_account_id,
+                json_body={
+                    "email_addresses": [child_email],
+                    "role": settings["role"],
+                    "seat_type": settings["seat_type"],
+                },
+            )
+            invite_data = invite_res.get("data")
+            if invite_data is not None:
+                log(f"[{child_email}] 邀请响应: {_clip_http_body(json.dumps(invite_data, ensure_ascii=False), 500)}")
+        except TeamTransferError as exc:
+            if exc.http_status == 409 or _error_has_code(exc, "already"):
+                _mark_skipped("invited", f"邀请接口返回已存在：{exc}")
+            else:
+                raise
+        time.sleep(settings["delay_invite"])
 
-        # 步骤2：子号接受邀请。网页 JS：POST /accounts/{acceptWorkspaceId}/invites/accept
-        if already_member:
-            _mark_skipped("accepted", "已是团队成员")
-        else:
-            log(f"[{child_email}] 步骤2/4 接受邀请 POST /accounts/{team_account_id}/invites/accept")
-            _run_step(
+        # 步骤2：子号真正接受邀请。网页 JS：
+        # POST /accounts/{acceptWorkspaceId}/invites/accept
+        # chatgpt-account-id = 当前会话工作区（子号 JWT 里的 account）。
+        # 子号 AT 若仍绑着已合并掉的个人空间，先重新登录再 POST，不跳过。
+        child_session = {
+            "token": child_token,
+            "account_id": _token_account_id(child_token),
+        }
+
+        def _do_accept():
+            return _run_step(
                 "accepted",
                 label="accept_invite",
-                token=child_token,
+                token=child_session["token"],
                 method="POST",
                 path=f"/accounts/{team_account_id}/invites/accept",
                 proxy=proxy,
-                account_id=None,
+                account_id=child_session["account_id"],
                 json_body={},
             )
-            time.sleep(settings["delay_accept"])
 
-        # 步骤3：去除个人空间。新加入的号必须走；只有已经在团队里、且个人
-        # workspace 已失效时才跳过（重试场景）。
-        log(f"[{child_email}] 步骤3/4 去除个人空间 POST /accounts/transfer workspace_id={team_account_id}")
+        log(
+            f"[{child_email}] 步骤2/4 接受邀请 POST /accounts/{team_account_id}/invites/accept "
+            f"chatgpt-account-id={child_session['account_id'] or '-'}"
+        )
+        try:
+            _do_accept()
+        except TeamTransferError as exc:
+            if not _workspace_gone(exc):
+                raise
+            if not callable(refresh_child_token):
+                raise TeamTransferError(
+                    f"accept_invite: 子号 AT 绑定的工作区已失效，无法接受邀请，请先重新登录该子号: {exc}",
+                    http_status=exc.http_status,
+                    needs_relogin=True,
+                ) from exc
+            log(f"[{child_email}] 子号工作区已失效，重新登录后再接受邀请")
+            refreshed = refresh_child_token() or {}
+            new_token = str(refreshed.get("access_token") or "").strip()
+            if not new_token:
+                raise TeamTransferError(
+                    f"子号重新登录后仍没有 accessToken，无法接受邀请: {refreshed.get('error') or ''}".strip(),
+                    needs_relogin=True,
+                )
+            child_session["token"] = new_token
+            child_session["account_id"] = (
+                str(refreshed.get("account_id") or "").strip() or _token_account_id(new_token)
+            )
+            log(
+                f"[{child_email}] 子号已重新登录，重试接受邀请 "
+                f"chatgpt-account-id={child_session['account_id'] or '-'}"
+            )
+            _do_accept()
+        time.sleep(settings["delay_accept"])
+
+        # 步骤3：母号合并个人空间数据（Settings → Merge）。
+        # POST /accounts/transfer，Bearer 母号 AT，chatgpt-account-id 与
+        # body.workspace_id 都是团队 workspace。个人空间已合并过时会
+        # invalid_workspace_selected / token_expired，按已完成跳过。
+        log(f"[{child_email}] 步骤3/4 母号合并个人空间 POST /accounts/transfer workspace_id={team_account_id}")
         try:
             _run_step(
                 "transferred",
                 label="transfer_account",
-                token=child_token,
+                token=admin_token,
                 method="POST",
                 path="/accounts/transfer",
                 proxy=proxy,
@@ -634,8 +781,8 @@ def transfer_child(
                 json_body={"workspace_id": team_account_id},
             )
         except TeamTransferError as exc:
-            if already_member and _error_has_code(exc, "invalid_workspace_selected", "token_expired"):
-                _mark_skipped("transferred", f"个人空间已不存在，子号 AT 无法再选原 workspace：{exc}")
+            if _workspace_gone(exc):
+                _mark_skipped("transferred", f"母号没有可合并的个人空间（可能已合并过）：{exc}")
             else:
                 raise
         time.sleep(settings["delay_transfer"])

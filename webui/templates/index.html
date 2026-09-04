@@ -2805,8 +2805,8 @@
       <li class="team-flow-step">
         <span class="team-flow-num" aria-hidden="true">3</span>
         <div class="team-flow-copy">
-          <strong>去除个人空间</strong>
-          <span>子号账户转到团队</span>
+          <strong>合并个人空间</strong>
+          <span>母号把个人数据并入团队</span>
         </div>
       </li>
       <li class="team-flow-step">
@@ -2898,7 +2898,7 @@
           <button type="button" class="jobs-tb-btn" id="btnTeamLoginSelected" disabled title="无 AT 的子号会走邮箱验证码，自动从收信 API 取码">提取 AT</button>
           <button type="button" class="jobs-tb-btn" id="btnTeamCodexSelected" disabled title="给选中子号补跑 Codex 授权，将消耗邮箱验证码">Codex 授权</button>
           <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnTeamCodexExportRt" disabled title="导出选中子号的 Codex refresh_token，每行：邮箱----RT">导出 RT</button>
-          <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnTeamTransferSelected" disabled title="邀请 → 接受 → 去除个人空间 → 踢出。不可撤销。">开始转移</button>
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--danger" id="btnTeamTransferSelected" disabled title="邀请 → 接受 → 母号合并个人空间数据 → 踢出。不可撤销。">开始转移</button>
         </div>
       </div>
       <div class="team-gate" id="teamGate" role="status"></div>
@@ -7145,7 +7145,7 @@ const TEAM_STEP_ORDER = ['invited', 'accepted', 'transferred', 'kicked'];
 const TEAM_STEP_LABELS = {
   invited: '邀请',
   accepted: '接受',
-  transferred: '转移',
+  transferred: '合并',
   kicked: '踢出',
 };
 const TEAM_STEP_SHORT = { invited: '邀', accepted: '接', transferred: '转', kicked: '踢' };
@@ -7277,8 +7277,8 @@ function updateTeamSelectionUi() {
         : missingAt === n
           ? '选中的子号都没有 AT，请先提取 AT'
           : missingAt
-            ? `邀请 → 接受 → 去除个人空间 → 踢出。将跳过 ${missingAt} 个无 AT 的子号。不可撤销。`
-            : '邀请 → 接受 → 去除个人空间 → 踢出。不可撤销。';
+            ? `邀请 → 接受 → 母号合并个人空间数据 → 踢出。将跳过 ${missingAt} 个无 AT 的子号。不可撤销。`
+            : '邀请 → 接受 → 母号合并个人空间数据 → 踢出。不可撤销。';
   }
   const gate = $('#teamGate');
   if (gate) {
@@ -7634,7 +7634,7 @@ async function teamTransferSelected() {
   const readyCount = ids.length - missingAt;
   if (readyCount <= 0) { showToast('选中的子号都没有 AT，请先提取 AT'); return; }
   const extra = missingAt ? `\n其中 ${missingAt} 个没有 AT，将被跳过。` : '';
-  if (!confirm(`对 ${readyCount} 个子号执行团队转移（邀请 → 接受 → 去除个人空间 → 踢出）？\n该操作会移除子号的个人空间，且不可撤销。${extra}`)) return;
+  if (!confirm(`对 ${readyCount} 个子号执行团队转移（邀请 → 接受 → 母号合并个人空间数据 → 踢出）？\n第 3 步会把母号个人空间数据并入团队，不可撤销。${extra}`)) return;
   const btn = $('#btnTeamTransferSelected');
   setBusy(btn, true, '入队中…');
   try {

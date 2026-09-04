@@ -70,6 +70,10 @@ EDITABLE_FIELDS = [
         "label": "收信拉取条数", "help": "单次拉取邮件条数，默认 1",
     },
     {
+        "key": "TEAM_MAIL_REQUEST_TIMEOUT", "file": "team_transfer.py", "type": "int", "group": "团队转移",
+        "label": "收信 API 超时(秒)", "help": "单次拉取邮件的 HTTP 超时，默认 40",
+    },
+    {
         "key": "TRANSFER_ROLE", "file": "team_transfer.py", "type": "str", "group": "团队转移",
         "label": "邀请角色", "help": "母号邀请子号时的角色，默认 standard-user",
     },
@@ -91,7 +95,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "TEAM_DELAY_AFTER_TRANSFER", "file": "team_transfer.py", "type": "int", "group": "团队转移",
-        "label": "转移后延时(秒)", "help": "去除个人空间成功后等待秒数",
+        "label": "转移后延时(秒)", "help": "母号合并个人空间成功后等待秒数",
     },
     {
         "key": "TEAM_TRANSFER_WORKERS", "file": "team_transfer.py", "type": "int", "group": "团队转移",

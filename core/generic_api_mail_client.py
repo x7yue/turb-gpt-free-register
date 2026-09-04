@@ -26,6 +26,15 @@ from core.otp_utils import extract_otp
 
 logger = logging.getLogger(__name__)
 
+
+def _http_timeout() -> int:
+    """单次拉邮件 HTTP 超时；默认跟 TEAM_MAIL_REQUEST_TIMEOUT=40。"""
+    try:
+        from config import team_transfer as team_cfg
+        return max(5, min(120, int(getattr(team_cfg, "TEAM_MAIL_REQUEST_TIMEOUT", 40) or 40)))
+    except Exception:
+        return 40
+
 _CODE_REGEX = re.compile(r"\b(\d{6})\b")
 _CONTEXT_WORDS = ("code", "verify", "verification", "验证码", "代码", "确认码", "認証", "コード")
 _CONTEXT_CACHE: dict[str, "GenericApiEmailAccount"] = {}
@@ -333,7 +342,7 @@ def _fetch_yangyang_otp(
     # 一般第一页足够；保守支持最多翻 5 页。
     for _ in range(5):
         url = api_url if not cursor else f"{api_url}?cursor={quote(str(cursor), safe='')}"
-        resp = session.get(url, headers={**headers, "Accept": "application/json"}, timeout=20, verify=False)
+        resp = session.get(url, headers={**headers, "Accept": "application/json"}, timeout=_http_timeout(), verify=False)
         if resp.status_code != 200:
             if resp.status_code == 404:
                 # 兼容 mail.ai1998.xyz 这类同样是 /messages/{token}/{email}，
@@ -371,7 +380,7 @@ def _fetch_yangyang_otp(
             continue
         detail_url = f"{origin}/message/{quote(str(msg_id), safe='')}/{token_q}/{email_q}"
         try:
-            detail_resp = session.get(detail_url, headers={**headers, "Accept": "application/json"}, timeout=20, verify=False)
+            detail_resp = session.get(detail_url, headers={**headers, "Accept": "application/json"}, timeout=_http_timeout(), verify=False)
             if detail_resp.status_code != 200:
                 continue
             detail = detail_resp.json()
@@ -425,7 +434,7 @@ def _fetch_inline_messages_page_otp(
         resp = session.get(
             code_url,
             headers={**headers, "Accept": "text/html,application/xhtml+xml,text/plain,*/*"},
-            timeout=20,
+            timeout=_http_timeout(),
             verify=False,
         )
         if resp.status_code != 200:
@@ -563,7 +572,9 @@ def fetch_latest_otp(
     if account is None:
         raise GenericApiMailError(f"通用 API 邮箱不存在或未导入: {email}")
 
-    deadline = time.time() + (max_wait or _email_cfg.OTP_MAX_WAIT)
+    wait_limit = int(max_wait or _email_cfg.OTP_MAX_WAIT)
+    started = time.time()
+    deadline = started + wait_limit
     interval = poll_interval or _email_cfg.OTP_POLL_INTERVAL
     settle = settle_seconds if settle_seconds is not None else _email_cfg.OTP_SETTLE_SECONDS
     headers = {
@@ -578,13 +589,19 @@ def fetch_latest_otp(
     settle_until: float | None = None
     logger.info(
         f"[GenericAPI] 开始轮询取码地址: {email}，"
-        f"最长 {max_wait or _email_cfg.OTP_MAX_WAIT}s, settle={settle}s"
+        f"最长 {wait_limit}s, settle={settle}s"
     )
     is_yangyang = _parse_yangyang_code_url(account.code_url) is not None
 
     attempt = 0
     while time.time() < deadline:
         attempt += 1
+        elapsed = int(time.time() - started)
+        remaining = int(deadline - time.time())
+        logger.info(
+            "[GenericAPI] 第 %s 次拉收件箱 %s（已等 %ss / %ss，剩余 %ss）…",
+            attempt, email, max(0, elapsed), wait_limit, max(0, remaining),
+        )
         try:
             session = requests.Session()
             # 不修改 yangyang 的路径型 URL；其列表接口本身按邮件 ID 返回数据。
@@ -619,7 +636,7 @@ def fetch_latest_otp(
                     resp = None
                     text = ""
                 else:
-                    resp = session.get(poll_url, headers=headers, timeout=20, verify=False)
+                    resp = session.get(poll_url, headers=headers, timeout=_http_timeout(), verify=False)
                     text = resp.text or ""
             if resp is None:
                 pass
@@ -667,6 +684,7 @@ def fetch_latest_otp(
                 last_error = f"HTTP {resp.status_code}: {text[:160]}"
         except Exception as exc:
             last_error = f"{type(exc).__name__}: {exc}"
+            logger.info("[GenericAPI] 第 %s 次拉收件箱失败：%s", attempt, last_error)
 
         now = time.time()
         if best_otp and settle_until is not None and now >= settle_until:

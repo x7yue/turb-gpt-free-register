@@ -366,6 +366,70 @@ def _run_transfer(*, account_id: int, email: str) -> dict:
         def progress(step: str) -> None:
             db.update_account_team_transfer_progress(account_id, step)
 
+        def refresh_child_token() -> dict:
+            acc_now = db.get_account(account_id) or {}
+            extra: dict = {}
+            try:
+                raw_extra = acc_now.get("extra_json") or "{}"
+                extra = json.loads(raw_extra) if isinstance(raw_extra, str) else (raw_extra or {})
+            except Exception:
+                extra = {}
+            if not isinstance(extra, dict):
+                extra = {}
+            password = str(
+                extra.get("registration_password")
+                or extra.get("mail_password")
+                or acc_now.get("registration_password")
+                or ""
+            ).strip()
+            email_source = str(acc_now.get("email_source") or "").strip() or None
+            totp_secret = str(acc_now.get("totp_secret") or "").strip()
+
+            def otp_waiter(target_email: str) -> str:
+                from core.team_transfer import wait_otp_with_progress
+                return wait_otp_with_progress(
+                    target_email,
+                    after_ts=time.time() - 20,
+                    email_source=email_source,
+                    log=lambda line: log(f"[{email}] {line}"),
+                    heartbeat_seconds=10,
+                )
+
+            log(f"[{email}] 子号 AT 工作区已失效，重新登录后再接受邀请")
+            login_res = login_admin(
+                email,
+                password,
+                totp_secret=totp_secret,
+                otp_waiter=otp_waiter,
+                log=lambda line: log(f"[{email}] {line}"),
+                role_label="子号",
+            )
+            if not login_res.get("ok") or not str(login_res.get("access_token") or "").strip():
+                raise TeamTransferError(
+                    f"子号重新登录失败: {login_res.get('error') or '未知错误'}",
+                    needs_relogin=True,
+                )
+            db.update_account_liveness(account_id, {
+                "ok": True,
+                "status": "live",
+                "access_token": login_res["access_token"],
+                "checked_at": login_res.get("checked_at"),
+                "session": {
+                    "accessToken": login_res["access_token"],
+                    "expires": login_res.get("expires"),
+                    "user": {"id": login_res.get("user_id")},
+                    "account": {
+                        "id": login_res.get("account_id") or login_res.get("team_account_id"),
+                        "planType": login_res.get("team_plan_type"),
+                    },
+                },
+            })
+            return {
+                "access_token": login_res["access_token"],
+                "account_id": login_res.get("account_id") or login_res.get("team_account_id"),
+                "user_id": login_res.get("user_id"),
+            }
+
         log(f"[转移] 开始 {email}（团队 {ctx['team_account_id']}，user_id={child_user_id}）")
         result = transfer_child(
             admin_email=ctx["email"],
@@ -375,6 +439,7 @@ def _run_transfer(*, account_id: int, email: str) -> dict:
             child_token=access_token,
             child_user_id=child_user_id,
             log=log,
+            refresh_child_token=refresh_child_token,
         )
         # 步进回写：把已完成的步骤同步到 DB（transfer_child 内部只在结束时返回）
         steps = result.get("steps") or {}

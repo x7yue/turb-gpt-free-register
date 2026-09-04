@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-团队转移（母号对子号去除个人空间）配置项。
+团队转移配置项。
 
-流程：母号邀请子号 → 子号接受邀请 → 子号去除个人空间(账户转移) → 母号踢出子号。
+流程：母号邀请子号 → 子号接受邀请 → 母号合并个人空间数据 → 母号踢出子号。
 子号邮箱统一使用 mail API（如 mail.siderchn.com）收取验证码：
     GET {TEAM_MAIL_API_BASE}{TEAM_MAIL_FETCH_PATH}?email=<邮箱>&password=<收信密码>&limit=1
 """
@@ -20,7 +20,7 @@ TEAM_MAIL_FETCH_PATH: str = "/emails"
 TEAM_MAIL_FETCH_LIMIT: int = 1
 
 # 收信 API 请求超时（秒）
-TEAM_MAIL_REQUEST_TIMEOUT: int = 20
+TEAM_MAIL_REQUEST_TIMEOUT: int = 40
 
 # ---- 邀请/转移参数（对照 remove_personal_space 参考实现） ----
 
@@ -33,7 +33,7 @@ TRANSFER_SEAT_TYPE: str = "default"
 # 子号接受邀请时提交的 TOS 版本
 TRANSFER_ACCEPTED_TOS_VERSION: str = "2024-12-17"
 
-# 去除个人空间请求体 transfer_personal 字段
+# 兼容旧配置名；合并个人空间实际只提交 workspace_id
 TRANSFER_PERSONAL: bool = True
 
 # ---- 步间延时（秒） ----
@@ -44,7 +44,7 @@ TEAM_DELAY_AFTER_INVITE: int = 3
 # 接受邀请成功后等待
 TEAM_DELAY_AFTER_ACCEPT: int = 2
 
-# 去除个人空间成功后等待
+# 母号合并个人空间成功后等待
 TEAM_DELAY_AFTER_TRANSFER: int = 5
 
 # ---- 执行控制 ----

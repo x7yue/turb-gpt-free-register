@@ -2440,7 +2440,7 @@ def create_app(auth_code: str | None = None) -> Flask:
         return jsonify(data)
 
     # ----------------------------------------------------------
-    # 团队转移（母号 → 子号去除个人空间）
+    # 团队转移（邀请 → 接受 → 母号合并个人空间数据 → 踢出）
     # ----------------------------------------------------------
     def _team_child_for_ui(row: dict) -> dict:
         item = _compact_account_for_list(row)
