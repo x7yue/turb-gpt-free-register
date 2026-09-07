@@ -33,8 +33,9 @@ SAFARI_WEBKIT_VERSION = "537.36"
 MAC_OS_UA_VERSION = "10_15_7"
 
 # ---------- curl_cffi 模拟浏览器 ----------
-# curl_cffi 0.15 当前最高内置到 chrome146；HTTP/JS 画像按抓包补齐到 Chrome/149。
-IMPERSONATE = "chrome146"
+# 指定 chrome146 等固定版本会被 Cloudflare 挑战 CSRF；用内置最新 chrome。
+# HTTP/JS 画像仍按抓包补齐到 Chrome/149。
+IMPERSONATE = "chrome"
 
 # ---------- 桌面 Chrome 画像 ----------
 BROWSER_FAMILY = "chrome"
