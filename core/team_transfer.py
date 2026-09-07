@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-团队转移核心流程：母号登录 + 四步（邀请→接受→母号合并个人空间数据→踢出）。
+团队转移核心流程：母号登录 + 四步（邀请→接受→子号合并个人空间数据→踢出）。
 
 母号登录：
     复用 account_liveness 的协议登录链路（CSRF → Signin → Authorize →
@@ -634,7 +634,7 @@ def transfer_child(
     refresh_child_token=None,
 ) -> dict:
     """
-    对单个子号执行四步：邀请 → 接受 → 母号合并个人空间数据 → 踢出。
+    对单个子号执行四步：邀请 → 接受 → 子号合并个人空间数据 → 踢出。
 
     child_user_id 是子号加入团队后的 user id（PATCH/DELETE 用）。
     refresh_child_token: 可选 fn() -> {access_token, account_id?}。接受邀请若因
@@ -764,16 +764,19 @@ def transfer_child(
             _do_accept()
         time.sleep(settings["delay_accept"])
 
-        # 步骤3：母号合并个人空间数据（Settings → Merge）。
-        # POST /accounts/transfer，Bearer 母号 AT，chatgpt-account-id 与
+        # 步骤3：子号合并个人空间数据（Settings → Merge）。
+        # POST /accounts/transfer，Bearer 子号 AT，chatgpt-account-id 与
         # body.workspace_id 都是团队 workspace。个人空间已合并过时会
         # invalid_workspace_selected / token_expired，按已完成跳过。
-        log(f"[{child_email}] 步骤3/4 母号合并个人空间 POST /accounts/transfer workspace_id={team_account_id}")
+        log(
+            f"[{child_email}] 步骤3/4 子号合并个人空间 POST /accounts/transfer "
+            f"workspace_id={team_account_id}"
+        )
         try:
             _run_step(
                 "transferred",
                 label="transfer_account",
-                token=admin_token,
+                token=child_session["token"],
                 method="POST",
                 path="/accounts/transfer",
                 proxy=proxy,
@@ -782,7 +785,7 @@ def transfer_child(
             )
         except TeamTransferError as exc:
             if _workspace_gone(exc):
-                _mark_skipped("transferred", f"母号没有可合并的个人空间（可能已合并过）：{exc}")
+                _mark_skipped("transferred", f"子号没有可合并的个人空间（可能已合并过）：{exc}")
             else:
                 raise
         time.sleep(settings["delay_transfer"])

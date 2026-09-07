@@ -313,8 +313,9 @@ class TransferChildFlowTests(unittest.TestCase):
         self.assertIsNone(ops[1]["account_id"])
         self.assertEqual(ops[2]["path"], "/accounts/transfer")
         self.assertEqual(ops[2]["json_body"], {"workspace_id": "team-123"})
+        self.assertEqual(ops[2]["account_id"], "team-123")
         self.assertEqual(ops[3]["path"], "/accounts/team-123/users/user-9")
-        self.assertEqual([c["token_kind"] for c in ops], ["admin", "child", "admin", "admin"])
+        self.assertEqual([c["token_kind"] for c in ops], ["admin", "child", "child", "admin"])
         self.assertEqual(set(result["steps"]), {"invited", "accepted", "transferred", "kicked"})
 
     def test_failure_stops_and_reports_step(self):
@@ -364,7 +365,7 @@ class TransferChildFlowTests(unittest.TestCase):
                     "items": [{"id": "user-9", "email": "kid@x.com", "role": "standard-user"}],
                 }, "error": None}
             if label == "transfer_account":
-                self.assertEqual(token, "ADMIN_AT")
+                self.assertEqual(token, "CHILD_AT")
                 return {"ok": True, "http_status": 200, "data": {"success": True}, "error": None}
             if label == "kick_user":
                 return {"ok": True, "http_status": 200, "data": {}, "error": None}
@@ -409,6 +410,7 @@ class TransferChildFlowTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["step"], "kicked")
         self.assertTrue(any("跳过步骤 transferred" in x for x in logs))
+        self.assertTrue(any("子号没有可合并的个人空间" in x for x in logs))
         self.assertIn("kick_user", self.captured)
 
     def test_new_member_transfer_failure_is_not_skipped(self):
@@ -471,6 +473,8 @@ class TransferChildFlowTests(unittest.TestCase):
         )
         accept_tokens = [token for label, token in self.captured if label == "accept_invite"]
         self.assertEqual(accept_tokens, ["STALE_AT", "FRESH_AT"])
+        transfer_tokens = [token for label, token in self.captured if label == "transfer_account"]
+        self.assertEqual(transfer_tokens, ["FRESH_AT"])
 
     def test_accept_workspace_gone_without_refresh_fails(self):
         def side(*, label, **kw):

@@ -95,7 +95,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "TEAM_DELAY_AFTER_TRANSFER", "file": "team_transfer.py", "type": "int", "group": "团队转移",
-        "label": "转移后延时(秒)", "help": "母号合并个人空间成功后等待秒数",
+        "label": "转移后延时(秒)", "help": "子号合并个人空间成功后等待秒数",
     },
     {
         "key": "TEAM_TRANSFER_WORKERS", "file": "team_transfer.py", "type": "int", "group": "团队转移",

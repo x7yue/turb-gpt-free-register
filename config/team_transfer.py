@@ -2,7 +2,7 @@
 """
 团队转移配置项。
 
-流程：母号邀请子号 → 子号接受邀请 → 母号合并个人空间数据 → 母号踢出子号。
+流程：母号邀请子号 → 子号接受邀请 → 子号合并个人空间数据 → 母号踢出子号。
 子号邮箱统一使用 mail API（如 mail.siderchn.com）收取验证码：
     GET {TEAM_MAIL_API_BASE}{TEAM_MAIL_FETCH_PATH}?email=<邮箱>&password=<收信密码>&limit=1
 """
@@ -44,7 +44,7 @@ TEAM_DELAY_AFTER_INVITE: int = 3
 # 接受邀请成功后等待
 TEAM_DELAY_AFTER_ACCEPT: int = 2
 
-# 母号合并个人空间成功后等待
+# 子号合并个人空间成功后等待
 TEAM_DELAY_AFTER_TRANSFER: int = 5
 
 # ---- 执行控制 ----
