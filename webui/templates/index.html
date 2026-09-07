@@ -2198,7 +2198,7 @@
     #tab-team .accounts-filter-v2 .acc-v2-selected { color: #909399; font-size: 13px; font-weight: 600; padding: 0 4px; }
     #tab-team .accounts-table-v2 { min-width: 920px; }
     #tab-team .accounts-table-v2 .col-token { width: 88px; }
-    #tab-team .accounts-table-v2 .col-plan { width: 92px; }
+    #tab-team .accounts-table-v2 .col-plan { width: 168px; }
     #tab-team .accounts-table-v2 .col-status { width: 92px; }
     #tab-team .accounts-table-v2 .col-transfer { width: 248px; white-space: normal; overflow: visible; }
     #tab-team .accounts-table-v2 .col-actions { width: 88px; }
@@ -2894,7 +2894,7 @@
         <div class="acc-v2-btn-group">
           <span class="acc-v2-selected" id="teamSelectedHint">已选 0</span>
           <button type="button" class="jobs-tb-btn" id="btnTeamToggleImport" aria-expanded="true">收起导入</button>
-          <button type="button" class="jobs-tb-btn" id="btnTeamRefresh">刷新</button>
+          <button type="button" class="jobs-tb-btn" id="btnTeamRefresh" title="查询子号当前订阅/套餐。有勾选则只查选中项，否则查当前筛选列表中已有 AT 的子号">刷新套餐</button>
           <button type="button" class="jobs-tb-btn" id="btnTeamLoginSelected" disabled title="无 AT 的子号会走邮箱验证码，自动从收信 API 取码">提取 AT</button>
           <button type="button" class="jobs-tb-btn" id="btnTeamCodexSelected" disabled title="给选中子号补跑 Codex 授权，将消耗邮箱验证码">Codex 授权</button>
           <button type="button" class="jobs-tb-btn jobs-tb-btn--good" id="btnTeamCodexExportRt" disabled title="导出选中子号的 Codex refresh_token，每行：邮箱----RT">导出 RT</button>
@@ -7303,6 +7303,65 @@ function teamSelectedAccounts() {
   return TEAM_CHILDREN.filter(c => ids.has(c.id));
 }
 
+const TEAM_PLAN_KEYS = [
+  'plan_type', 'current_plan_type', 'plus_trial_eligible', 'plan_check_ok',
+  'plan_check_status', 'plan_check_error', 'plan_check_trigger',
+  'plan_check_queued_at', 'plan_check_started_at', 'plan_checked_at',
+  'plan_last_success_at', 'plan_expires_at', 'plan_renews_at', 'renews_at',
+  'expires_at', 'billing_period', 'billing_currency', 'discount_amount',
+  'discount_type', 'discount_expires_at', 'discount_promo_campaign_id',
+  'plan_check_network_route', 'plan_check_proxy_used',
+  'plan_check_proxy_fallback_reason',
+];
+
+function applyTeamChildPlan(target, source) {
+  if (!target || !source) return false;
+  let changed = false;
+  TEAM_PLAN_KEYS.forEach((key) => {
+    if (target[key] !== source[key]) {
+      if (source[key] === undefined) delete target[key];
+      else target[key] = source[key];
+      changed = true;
+    }
+  });
+  return changed;
+}
+
+async function refreshTeamPlans() {
+  const selected = teamSelectedAccounts();
+  const source = selected.length ? selected : teamFiltered();
+  const withAt = source.filter(c => c.has_access_token);
+  const skippedNoAt = source.length - withAt.length;
+  if (!withAt.length) {
+    showToast(source.length ? '这些子号都没有 AT，无法查询订阅' : '没有可刷新的子号');
+    return;
+  }
+  const btn = $('#btnTeamRefresh');
+  const old = btn ? btn.textContent : '刷新套餐';
+  if (btn) { btn.disabled = true; btn.textContent = '查询中…'; }
+  try {
+    const r = await api('/api/accounts/check-plan-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_ids: withAt.map(c => c.id) }),
+    });
+    const started = r.started_count || 0;
+    const busy = r.busy_count || 0;
+    const failed = r.failed_count || 0;
+    const skipped = (r.skipped_count || 0) + skippedNoAt;
+    showToast(`已入队 ${started} 个套餐查询，忙碌 ${busy}，失败 ${failed}${skipped ? `，跳过 ${skipped}` : ''}`);
+    startTeamPoll(true);
+    await loadTeam();
+  } catch (e) {
+    showToast('刷新订阅失败: ' + (e.message || e));
+  } finally {
+    if (btn) {
+      btn.textContent = old;
+      btn.disabled = false;
+    }
+  }
+}
+
 function renderTeamChildren() {
   const body = $('#teamChildrenBody');
   if (!body) return;
@@ -7352,7 +7411,7 @@ function renderTeamChildren() {
       <td class="col-check"><input type="checkbox" class="team-child-check" data-team-id="${c.id}"${checked} aria-label="选择 ${esc(c.email || '')}"></td>
       <td class="col-email"><div class="acc-v2-email" title="${esc(c.email || '')}">${esc(c.email || '')}</div><div class="acc-v2-sub">#${c.id}</div></td>
       <td class="col-token">${atBadge}</td>
-      <td class="col-plan">${esc(c.plan_type || c.current_plan_type || '—')}</td>
+      <td class="col-plan">${_planCell(c)}</td>
       <td class="col-status">${codexBadge}</td>
       <td class="col-transfer">${teamStepView(c.team_transfer_status, c.team_transfer_step, c.team_transfer_error)}</td>
       <td class="col-actions"><button type="button" class="jobs-tb-btn" data-team-log="${esc(c.email || '')}">日志</button></td>
@@ -7659,7 +7718,8 @@ function startTeamPoll(fast) {
     if ($('#tab-team').classList.contains('hidden')) { clearInterval(TEAM_POLL_TIMER); return; }
     refreshTeamStatus();
   };
-  const busy = fast || TEAM_ADMIN.state === 'logging_in' || TEAM_ADMIN.state === 'waiting_otp';
+  const planBusy = TEAM_CHILDREN.some(c => ['queued', 'running'].includes(c.plan_check_status));
+  const busy = fast || planBusy || TEAM_ADMIN.state === 'logging_in' || TEAM_ADMIN.state === 'waiting_otp';
   TEAM_POLL_TIMER = setInterval(tick, busy ? 2000 : 5000);
 }
 
@@ -7702,6 +7762,7 @@ async function refreshTeamStatus() {
         if (s.codex_status != null) c.codex_status = s.codex_status;
         changed = true;
       }
+      if (applyTeamChildPlan(c, s)) changed = true;
     });
     if (changed) renderTeamChildren();
     else renderTeamMetrics();
@@ -7799,7 +7860,7 @@ $('#btnTeamAdminReset')?.addEventListener('click', teamAdminReset);
 $('#btnTeamSubmitOtp')?.addEventListener('click', teamSubmitOtp);
 $('#teamAdminOtpInput')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); teamSubmitOtp(); } });
 $('#btnTeamImportChildren')?.addEventListener('click', teamImportChildren);
-$('#btnTeamRefresh')?.addEventListener('click', loadTeam);
+$('#btnTeamRefresh')?.addEventListener('click', refreshTeamPlans);
 $('#btnTeamLoginSelected')?.addEventListener('click', teamLoginSelected);
 $('#btnTeamCodexSelected')?.addEventListener('click', teamCodexSelected);
 $('#btnTeamCodexExportRt')?.addEventListener('click', teamExportCodexRt);

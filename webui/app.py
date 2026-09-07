@@ -126,13 +126,17 @@ def _compact_account_for_list(row: dict) -> dict:
     out["team_transfer_status"] = row.get("team_transfer_status") or ""
     out["team_transfer_step"] = row.get("team_transfer_step") or ""
 
-    if row.get("plan_check_status") in ("queued", "running") or row.get("plan_check_ok") is False:
+    if row.get("plan_check_ok") is not None:
         out["plan_check_ok"] = row.get("plan_check_ok")
 
     # 下面字段仅在有值时返回，避免每行堆满 null/空字符串/内部状态。
     optional_keys = (
-        # 套餐展示补充：付费到期/折扣/失败原因。
+        # 套餐展示补充：付费到期/折扣/失败原因/查询进度。
         "plan_check_error", "plan_expires_at", "plan_renews_at", "renews_at",
+        "plan_checked_at", "plan_check_trigger", "plan_check_queued_at",
+        "plan_check_started_at", "plan_last_success_at",
+        "plan_check_network_route", "plan_check_proxy_used",
+        "plan_check_proxy_fallback_reason",
         "billing_period", "billing_currency", "discount_amount", "discount_type",
         "discount_expires_at", "discount_promo_campaign_id",
         "token_expired", "token_expires_at",
