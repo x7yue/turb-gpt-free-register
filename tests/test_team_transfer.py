@@ -590,6 +590,7 @@ class AdminSessionPersistTests(unittest.TestCase):
         self._old_ready_path = db_mod._SQLITE_READY_PATH
         self._old_admin = dict(svc._ADMIN)
         self._old_hydrated = svc._ADMIN_HYDRATED
+        self._old_gen = svc._ADMIN_GEN
         fd, path = tempfile.mkstemp(suffix=".sqlite3")
         os.close(fd)
         os.remove(path)
@@ -611,6 +612,7 @@ class AdminSessionPersistTests(unittest.TestCase):
         self.svc._ADMIN.clear()
         self.svc._ADMIN.update(self._old_admin)
         self.svc._ADMIN_HYDRATED = self._old_hydrated
+        self.svc._ADMIN_GEN = self._old_gen
         try:
             if tmp and tmp != self._old_sqlite and tmp != db_mod._DEFAULT_SQLITE_PATH:
                 os.remove(str(tmp))
@@ -660,6 +662,27 @@ class AdminSessionPersistTests(unittest.TestCase):
         status = svc.admin_status()
         self.assertEqual(status["state"], "idle")
         self.assertFalse(status["has_access_token"])
+        self.assertIsNone(svc._admin_context())
+
+    def test_reset_discards_in_flight_login(self):
+        svc = self.svc
+        svc._ADMIN.update({"state": "logging_in", "email": "old@school.edu"})
+        started_gen = svc._ADMIN_GEN
+
+        def fake_login(*_a, **_k):
+            svc.reset_admin()
+            return {
+                "ok": True,
+                "access_token": "late-at",
+                "user_id": "user-x",
+                "team_account_id": "team-x",
+            }
+
+        with patch.object(svc, "login_admin", side_effect=fake_login):
+            svc._run_admin_login("old@school.edu", "pw", "")
+        self.assertGreater(svc._ADMIN_GEN, started_gen)
+        self.assertEqual(svc._ADMIN["state"], "idle")
+        self.assertFalse(svc.admin_status()["has_access_token"])
         self.assertIsNone(svc._admin_context())
 
 

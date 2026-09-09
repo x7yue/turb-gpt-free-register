@@ -2545,7 +2545,7 @@ def create_app(auth_code: str | None = None) -> Flask:
 
     @app.post("/api/team/admin-reset")
     def api_team_admin_reset():
-        """重置母号登录态。"""
+        """退出 / 更换母号：清空当前登录态。"""
         return jsonify(team_transfer_service.reset_admin())
 
     @app.post("/api/team/transfer-bulk")

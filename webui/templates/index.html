@@ -2834,6 +2834,7 @@
             <button type="button" id="btnCopyTeamId">复制</button>
           </div>
           <button type="button" class="jobs-tb-btn" id="btnTeamAdminLog" title="查看母号登录与转移日志">查看日志</button>
+          <button type="button" class="jobs-tb-btn jobs-tb-btn--danger hidden" id="btnTeamAdminLogout" hidden title="退出当前母号，然后可以登录另一个母号">退出 / 更换母号</button>
         </div>
       </div>
       <form class="team-admin-form" id="teamAdminForm" autocomplete="off" onsubmit="return false;">
@@ -2856,7 +2857,7 @@
         </label>
         <div class="team-admin-actions">
           <button type="submit" class="jobs-tb-btn jobs-tb-btn--primary" id="btnTeamAdminLogin">登录母号</button>
-          <button type="button" class="jobs-tb-btn" id="btnTeamAdminReset" hidden>取消</button>
+          <button type="button" class="jobs-tb-btn" id="btnTeamAdminReset" hidden title="取消当前登录或清空失败状态">取消</button>
         </div>
       </form>
       <div class="team-otp" id="teamAdminOtpRow" role="status">
@@ -7500,10 +7501,16 @@ function renderTeamAdmin(admin) {
   }
   const resetBtn = $('#btnTeamAdminReset');
   if (resetBtn) {
-    const show = state !== 'idle';
+    const show = state === 'logging_in' || state === 'waiting_otp' || state === 'failed';
     resetBtn.hidden = !show;
     resetBtn.classList.toggle('hidden', !show);
-    resetBtn.textContent = state === 'logged_in' ? '退出登录' : (state === 'failed' ? '重置' : '取消');
+    resetBtn.textContent = state === 'failed' ? '重置' : '取消';
+  }
+  const logoutBtn = $('#btnTeamAdminLogout');
+  if (logoutBtn) {
+    const showLogout = state === 'logged_in';
+    logoutBtn.hidden = !showLogout;
+    logoutBtn.classList.toggle('hidden', !showLogout);
   }
   const creds = $('#teamAdminForm');
   if (creds) creds.style.display = state === 'logged_in' ? 'none' : '';
@@ -7543,12 +7550,27 @@ async function teamAdminLogin() {
 
 async function teamAdminReset() {
   const state = TEAM_ADMIN.state;
-  const msg = state === 'logged_in' ? '退出后需要重新登录母号才能转移，确定退出？' : '确定取消当前母号登录？';
+  const email = TEAM_ADMIN.email || ($('#teamAdminEmail')?.value || '').trim();
+  const running = TEAM_CHILDREN.some(c => c.team_transfer_status === 'queued' || c.team_transfer_status === 'running');
+  let msg = '确定取消当前母号登录？';
+  if (state === 'logged_in') {
+    msg = running
+      ? `有子号正在转移。退出母号 ${email || ''} 后，进行中的任务会因母号失效而失败。确定退出并更换？`
+      : `退出母号 ${email || ''} 后需要重新登录才能转移。确定退出 / 更换母号？`;
+  } else if (state === 'failed') {
+    msg = '确定清空当前失败状态，以便登录或更换母号？';
+  }
   if (!confirm(msg)) return;
   try {
     await api('/api/team/admin-reset', { method: 'POST' });
-    showToast(state === 'logged_in' ? '母号已退出' : '已取消登录');
+    showToast(state === 'logged_in' ? '母号已退出，可登录另一个母号' : '已取消登录');
     renderTeamAdmin({ state: 'idle' });
+    const pwd = $('#teamAdminPassword');
+    const totp = $('#teamAdminTotp');
+    if (pwd) pwd.value = '';
+    if (totp) totp.value = '';
+    $('#teamAdminEmail')?.focus();
+    startTeamPoll();
   } catch (e) { showToast(e.message); }
 }
 
@@ -7857,6 +7879,7 @@ $('#btnCloseTeamLog')?.addEventListener('click', closeTeamLog);
 $('#btnTeamAdminLog')?.addEventListener('click', openAdminLog);
 $('#teamAdminForm')?.addEventListener('submit', (e) => { e.preventDefault(); teamAdminLogin(); });
 $('#btnTeamAdminReset')?.addEventListener('click', teamAdminReset);
+$('#btnTeamAdminLogout')?.addEventListener('click', teamAdminReset);
 $('#btnTeamSubmitOtp')?.addEventListener('click', teamSubmitOtp);
 $('#teamAdminOtpInput')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); teamSubmitOtp(); } });
 $('#btnTeamImportChildren')?.addEventListener('click', teamImportChildren);

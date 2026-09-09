@@ -30,6 +30,8 @@ _LOG_DIR = _PROJECT_ROOT / "注册日志"
 _ADMIN_LOCK = threading.Lock()
 _ADMIN_META_KEY = "team_admin_session"
 _ADMIN_HYDRATED = False
+# 每次开始登录 / 退出母号时递增，用来丢弃已取消的后台登录结果。
+_ADMIN_GEN = 0
 _ADMIN: dict = {
     "state": "idle",  # idle / logging_in / waiting_otp / logged_in / failed
     "email": "",
@@ -173,6 +175,7 @@ def submit_admin_otp(email: str, code: str) -> dict:
 
 def start_admin_login(email: str, password: str, totp_secret: str = "") -> dict:
     """后台线程执行母号登录。同一时间只允许一个登录任务。"""
+    global _ADMIN_GEN
     email = str(email or "").strip()
     password = str(password or "")
     if not email or not password:
@@ -181,7 +184,8 @@ def start_admin_login(email: str, password: str, totp_secret: str = "") -> dict:
     _hydrate_admin()
     with _ADMIN_LOCK:
         if _ADMIN.get("state") in {"logging_in", "waiting_otp"}:
-            return {"accepted": False, "error": "母号正在登录中，请等待完成或先重置"}
+            return {"accepted": False, "error": "母号正在登录中，请等待完成或先退出"}
+        _ADMIN_GEN += 1
         _ADMIN.update({
             "state": "logging_in",
             "email": email,
@@ -200,9 +204,12 @@ def start_admin_login(email: str, password: str, totp_secret: str = "") -> dict:
 
 
 def reset_admin() -> dict:
+    """退出当前母号：清内存、清持久化，并丢弃进行中的登录线程结果。"""
+    global _ADMIN_GEN
     _hydrate_admin()
     with _ADMIN_LOCK:
         email = _ADMIN.get("email") or ""
+        _ADMIN_GEN += 1
         _ADMIN.update({
             "state": "idle",
             "email": "",
@@ -214,19 +221,39 @@ def reset_admin() -> dict:
             "error": None,
             "logged_in_at": None,
         })
+    if email:
+        try:
+            from core.manual_otp import clear_waiting
+            clear_waiting(email)
+        except Exception:
+            pass
     _persist_admin()
-    _append_log(email or "admin", "[母号] 已手动重置登录态", clear=True)
-    return {"ok": True}
+    _append_log(email or "admin", "[母号] 已退出登录，可更换母号", clear=True)
+    return {"ok": True, "state": "idle"}
 
 
 def _run_admin_login(email: str, password: str, totp_secret: str) -> None:
+    with _ADMIN_LOCK:
+        gen = _ADMIN_GEN
+
+    def _still_current() -> bool:
+        with _ADMIN_LOCK:
+            return (
+                _ADMIN_GEN == gen
+                and str(_ADMIN.get("email") or "") == email
+                and _ADMIN.get("state") in {"logging_in", "waiting_otp"}
+            )
+
     def log(line: str) -> None:
         logger.info("[母号登录] %s", line)
         _append_log(email, f"[母号登录] {line}")
 
     def otp_waiter(target_email: str) -> str:
+        if not _still_current():
+            raise TeamTransferError("母号已退出，登录已取消")
         with _ADMIN_LOCK:
-            _ADMIN["state"] = "waiting_otp"
+            if _ADMIN_GEN == gen:
+                _ADMIN["state"] = "waiting_otp"
         log("等待人工输入邮箱验证码（WebUI 团队转移页提交）")
         from core.manual_otp import wait_for_manual_otp
         timeout = max(60, int(getattr(cfg, "TEAM_ADMIN_OTP_TIMEOUT", 300) or 300))
@@ -234,7 +261,7 @@ def _run_admin_login(email: str, password: str, totp_secret: str) -> None:
             return wait_for_manual_otp(target_email, timeout=timeout)
         finally:
             with _ADMIN_LOCK:
-                if _ADMIN.get("state") == "waiting_otp":
+                if _ADMIN_GEN == gen and _ADMIN.get("state") == "waiting_otp":
                     _ADMIN["state"] = "logging_in"
 
     try:
@@ -249,6 +276,9 @@ def _run_admin_login(email: str, password: str, totp_secret: str) -> None:
         result = {"ok": False, "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
 
     with _ADMIN_LOCK:
+        if _ADMIN_GEN != gen or str(_ADMIN.get("email") or "") != email:
+            log("登录结果已丢弃：母号已退出或更换")
+            return
         if result.get("ok"):
             _ADMIN.update({
                 "state": "logged_in",
